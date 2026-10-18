@@ -38,5 +38,5 @@ DACN_HK261/
 │
 ├── .env                        # Environment variables and credentials (local only)
 ├── docker-compose.yml          # Configuration for Neo4j, Qdrant/Chroma, and SeaweedFS
-├── requirements.txt             # Python dependencies
+├── requirements.txt            # Python dependencies
 └── README.md                   # Project documentation
