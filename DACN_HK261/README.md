@@ -37,7 +37,8 @@ DACN_HK261/
 │   └── compare_baselines.py    # Run and compare all three baselines
 │
 ├── app/                        # User interface and API (planned)
-│   ├── api_server.py           # REST API backend
+│   ├── backend/
+│   │   ├── api_server.py       # REST API backend  
 │   └── frontend/               # React frontend
 │
 ├── .env                        # Environment variables and credentials (local only)
