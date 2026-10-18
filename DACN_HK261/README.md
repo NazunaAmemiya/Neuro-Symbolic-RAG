@@ -4,12 +4,6 @@
 
 ```text
 DACN_HK261/
-│
-├── data/                       # Dataset for the project
-│   ├── raw/                    # Original documents (PDF, TXT, DOCX)
-│   ├── processed/              # Preprocessed data (chunks, JSON)
-│   └── toy_dataset/            # Small dataset for pipeline testing
-│
 ├── core/                       # Shared core modules
 │   ├── __init__.py
 │   ├── config.py               # Environment variables and database configuration
