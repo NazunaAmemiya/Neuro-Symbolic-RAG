@@ -4,6 +4,7 @@
 
 ```text
 DACN_HK261/
+│
 ├── core/                       # Shared core modules
 │   ├── __init__.py
 │   ├── config.py               # Environment variables and database configuration
