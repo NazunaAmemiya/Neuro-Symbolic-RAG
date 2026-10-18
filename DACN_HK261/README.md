@@ -1,43 +1,46 @@
-'''text
+# DACN_HK261
+
+## Project Structure
+
+```text
 DACN_HK261/
 │
-├── data/                       # Chứa dataset cho dự án
-│   ├── raw/                    # Dữ liệu nguyên bản (PDF, txt, docx)
-│   ├── processed/              # Dữ liệu đã qua tiền xử lý (chunks, JSON)
-│   └── toy_dataset/            # Tập dữ liệu nhỏ để test nhanh pipeline
+├── data/                       # Dataset for the project
+│   ├── raw/                    # Original documents (PDF, TXT, DOCX)
+│   ├── processed/              # Preprocessed data (chunks, JSON)
+│   └── toy_dataset/            # Small dataset for pipeline testing
 │
-├── core/                       # Các module lõi dùng chung (Nơi tạo ra sự kế thừa)
+├── core/                       # Shared core modules
 │   ├── __init__.py
-│   ├── config.py               # Quản lý biến môi trường, kết nối DBs
-│   ├── data_ingestion.py       # Code đọc file và chunking cố định
-│   ├── embeddings.py           # Khởi tạo mô hình nhúng BGE-M3
-│   ├── llm_service.py          # Class giao tiếp với Ollama chạy Qwen 7B
-│   ├── vector_db.py            # Tương tác với Chroma hoặc Qdrant
-│   ├── graph_db.py             # Tương tác với Neo4j (Sẽ dùng ở Baseline 2, 3)
-│   └── tracing.py              # Cấu hình Phoenix/Langfuse/Langsmith
+│   ├── config.py               # Environment variables and database configuration
+│   ├── data_ingestion.py       # Document loading and fixed-size chunking
+│   ├── embeddings.py           # BGE-M3 embedding model initialization
+│   ├── llm_service.py          # Interface for Qwen 7B running through Ollama
+│   ├── vector_db.py            # Vector database integration (Chroma or Qdrant)
+│   ├── graph_db.py             # Neo4j integration for Baselines 2 and 3
+│   └── tracing.py              # Tracing and observability configuration
 │
-├── baselines/                  # Nơi lắp ráp 3 pipeline độc lập (Nơi tách biệt để đánh giá)
+├── baselines/                  # Three independent RAG pipelines
 │   ├── __init__.py
-│   ├── baseline_1_vector.py    # Pipeline RAG Truyền thống (Vector DB + LLM)
-│   ├── baseline_2_graph.py     # Pipeline Graph-Enhanced RAG (Thêm GraphDB)
-│   └── baseline_3_neuro.py     # Neuro-Symbolic RAG (Thêm Symbolic Verification)
+│   ├── baseline_1_vector.py    # Baseline 1: Traditional Vector RAG
+│   ├── baseline_2_graph.py     # Baseline 2: Graph-Enhanced RAG
+│   └── baseline_3_neuro.py     # Baseline 3: Neuro-Symbolic RAG
 │
-├── symbolic_logic/             # Thư mục dành riêng cho Baseline 3
+├── symbolic_logic/             # Symbolic reasoning components for Baseline 3
 │   ├── __init__.py
-│   ├── rules.py                # Định nghĩa các luật logic, ràng buộc cứng
-│   └── verifier.py             # Thuật toán kiểm tra reasoning path trên đồ thị
+│   ├── rules.py                # Logical rules and hard constraints
+│   └── verifier.py             # Reasoning-path verification on the knowledge graph
 │
-├── evaluation/                 # Công cụ đo lường các cấu hình RAG
+├── evaluation/                 # Evaluation and comparison of RAG baselines
 │   ├── __init__.py
-│   ├── metrics.py              # Code tính 5 tiêu chí
-│   └── compare_baselines.py    # Script chạy 3 baseline cùng lúc để ra bảng so sánh
+│   ├── metrics.py              # Implementation of five evaluation metrics
+│   └── compare_baselines.py    # Run and compare all three baselines
 │
-├── app/                        # Giao diện người dùng và API (Làm ở giai đoạn sau)
-│   ├── api_server.py           # REST API Backend
-│   └── frontend/               # React Code
+├── app/                        # User interface and API (planned)
+│   ├── api_server.py           # REST API backend
+│   └── frontend/               # React frontend
 │
-├── .env                        # Chứa các thông số bảo mật (API keys, DB passwords)
-├── docker-compose.yml          # File khởi tạo hàng loạt Neo4j, Qdrant/Chroma, SeaweedF
-├── requirements.txt            # Danh sách thư viện (LangChain, neo4j, qdrant-client...)
-└── README.md                   # Hướng dẫn setup và chạy dự án
-'''
+├── .env                        # Environment variables and credentials (local only)
+├── docker-compose.yml          # Configuration for Neo4j, Qdrant/Chroma, and SeaweedFS
+├── requirements.txt             # Python dependencies
+└── README.md                   # Project documentation
