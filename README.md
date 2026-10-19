@@ -1,6 +1,6 @@
 # DACN_HK261
 
-'''text
+```text
 DACN_HK261/
 │
 ├── core/                       # Các module lõi dùng chung (Nơi tạo ra sự kế thừa)
@@ -39,3 +39,4 @@ DACN_HK261/
 ├── docker-compose.yml          # File khởi tạo hàng loạt Neo4j, Qdrant/Chroma, SeaweedF
 ├── requirements.txt            # Danh sách thư viện (LangChain, neo4j, qdrant-client...)
 └── README.md                   # Hướng dẫn setup và chạy dự án
+```
