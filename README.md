@@ -1,15 +1,13 @@
+# DACN_HK261
+
 '''text
 DACN_HK261/
-│
-├── data/                       # Chứa dataset cho dự án
-│   ├── raw/                    # Dữ liệu nguyên bản (PDF, txt, docx)
-│   ├── processed/              # Dữ liệu đã qua tiền xử lý (chunks, JSON)
-│   └── toy_dataset/            # Tập dữ liệu nhỏ để test nhanh pipeline
 │
 ├── core/                       # Các module lõi dùng chung (Nơi tạo ra sự kế thừa)
 │   ├── __init__.py
 │   ├── config.py               # Quản lý biến môi trường, kết nối DBs
 │   ├── data_ingestion.py       # Code đọc file và chunking cố định
+│   ├── data_loader.py          # Code lấy dữ liệu từ hugging face
 │   ├── embeddings.py           # Khởi tạo mô hình nhúng BGE-M3
 │   ├── llm_service.py          # Class giao tiếp với Ollama chạy Qwen 7B
 │   ├── vector_db.py            # Tương tác với Chroma hoặc Qdrant
@@ -37,7 +35,7 @@ DACN_HK261/
 │   └── frontend/               # React Code
 │
 ├── .env                        # Chứa các thông số bảo mật (API keys, DB passwords)
+├── Dockerfile                  
 ├── docker-compose.yml          # File khởi tạo hàng loạt Neo4j, Qdrant/Chroma, SeaweedF
 ├── requirements.txt            # Danh sách thư viện (LangChain, neo4j, qdrant-client...)
 └── README.md                   # Hướng dẫn setup và chạy dự án
-'''
