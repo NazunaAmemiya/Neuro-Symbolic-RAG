@@ -1,0 +1,38 @@
+# Secrets and local Python tooling
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest-tmp/
+.ruff_cache/
+*.egg-info/
+
+# Local legal corpus and generated ingest outputs
+data/source_packages/*
+!data/source_packages/.gitkeep
+data/derived/*
+!data/derived/.gitkeep
+data/artifacts/*
+!data/artifacts/.gitkeep
+
+# Temporary local corpus and legacy comparison material
+data_old/
+ingestion_old/
+
+# Runtime data: never version database or container volumes
+*.db
+*.sqlite
+*.sqlite3
+qdrant_storage/
+neo4j_data/
+minio_data/
+langfuse_data/
+docker-volumes/
+logs/
+
+# Frontend and editor state
+frontend/node_modules/
+frontend/dist/
+.idea/
+.vscode/
