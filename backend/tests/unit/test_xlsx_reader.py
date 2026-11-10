@@ -3,6 +3,7 @@ from zipfile import ZipFile
 from openpyxl import Workbook
 from openpyxl.worksheet.datavalidation import DataValidation
 
+from backend.app.ingestion.content_chunker import build_content_chunks
 from backend.app.ingestion.models import BlockKind, SourceRole
 from backend.app.ingestion.pipeline import prepare_entry_document
 from backend.app.ingestion.source_catalog import build_source_catalog
@@ -64,3 +65,9 @@ def test_workbook_is_prepared_without_downstream_processing(tmp_path) -> None:
     assert document.package_id == "07_2024_TT-BKHDT"
     assert document.source_role is SourceRole.FORM_WORKBOOK
     assert document.source_relative_path == entry.relative_path
+
+    chunks = build_content_chunks(document)
+    assert chunks
+    assert all(chunk.package_id == "07_2024_TT-BKHDT" for chunk in chunks)
+    assert all(chunk.source_role is SourceRole.FORM_WORKBOOK for chunk in chunks)
+    assert all(chunk.parent_document_id == entry.parent_document_id for chunk in chunks)

@@ -1,13 +1,16 @@
 # Legal GraphRAG
 
 This repository is being rebuilt as a Legal GraphRAG system for Vietnamese legal
-documents. The active implementation milestone stops at Markdown preparation and data
-validation. Parsing, chunking, embedding, and indexing are disabled for now.
+documents. Markdown preparation and chunk generation are reproducible local phases.
+Embedding and indexing remain deferred.
 
 ## Current scope
 
 ```text
-source packages → extraction → normalization → Markdown view → manual validation
+Hugging Face Office sources
+  → extraction + normalization
+  → local Markdown + validation evidence
+  → local legal/content chunks
 ```
 
 Shared source packages accept only `.doc`, `.docx`, and `.xlsx`. Generated Markdown is
@@ -19,13 +22,15 @@ XLSX forms are read without flattening sheets, merged ranges, formulas, or valid
 
 ```text
 backend/app/core/          settings
-backend/app/ingestion/     extraction, normalization, and deferred parser prototypes
-backend/tests/             extraction and rendering unit tests
-scripts/                   corpus sync and Markdown preparation
+backend/app/ingestion/     extraction, normalization, parsing, and chunk source
+backend/tests/             extraction, rendering, parser, and chunk tests
+scripts/                   corpus sync, Markdown preparation, local chunk generation
 data/source_packages/      ignored Hugging Face source tree
 data/derived/conversions/  ignored DOC conversion cache
 data/derived/markdown/     ignored portable Markdown views and assets
+data/derived/chunks/       ignored generated chunks and hierarchy
 data/artifacts/            ignored blocks, reports, and validation queue
+data/runtime/              ignored database/container volumes
 docs/                      architecture notes
 ```
 
@@ -50,13 +55,15 @@ corpus. Neither source documents nor generated artifacts are committed.
 uv sync --extra dev
 uv run python scripts/sync_source_documents.py
 uv run python scripts/ingest_documents.py
+uv run python scripts/generate_chunks.py
 uv run pytest
 ```
 
 The Hugging Face dataset contains source Office files only. Sync, DOC conversion,
-Markdown generation and future chunks/database indexes stay local and are
+Markdown, chunks, database indexes, and container volumes stay local and are
 ignored by Git. Output locations are configurable through `SOURCE_PACKAGES_DIR`,
-`CONVERTED_DOCS_DIR`, `MARKDOWN_OUTPUT_DIR`, and `INGEST_ARTIFACTS_DIR`.
+`CONVERTED_DOCS_DIR`, `MARKDOWN_OUTPUT_DIR`, `CHUNKS_OUTPUT_DIR`,
+`INGEST_ARTIFACTS_DIR`, and `LOCAL_RUNTIME_DIR`.
 
 `scripts/ingest_documents.py` generates Markdown by default. Use `--markdown-dir` to
 choose another local directory, or `--no-markdown` when only structured artifacts are
@@ -74,6 +81,28 @@ filenames cannot overwrite one another. A package is rejected when its primary d
 is absent, preventing an isolated form from being treated as an independently validated
 legal source.
 
-Qdrant, Neo4j, SQLite, and their local container bootstrap are not implemented in this
-milestone yet. When added, their volumes must follow the same rule: local and ignored,
-with reproducible rebuild commands committed to the repository.
+`scripts/generate_chunks.py` is a separate downstream phase. It refuses to run unless the
+current source IDs exist in the Markdown-preparation manifest. Primary legal documents use
+the legal hierarchy parser; appendices and forms use content windows linked to their parent
+document. The generated `chunks.jsonl`, `hierarchy.json`, manifests, and reports live only
+under `data/derived/chunks/` and are never committed.
+
+## Shared-code/local-data rule
+
+GitHub contains source code, tests, configuration examples, lockfiles, and runbooks.
+Hugging Face contains immutable Office source documents. Each clone recreates all derived
+state locally using repository-relative paths:
+
+```text
+data/source_packages/   Hugging Face snapshot
+data/derived/           conversions, Markdown, chunks
+data/artifacts/         extraction/validation evidence
+data/runtime/           Qdrant, Neo4j, SQLite, object storage, other container volumes
+```
+
+Future Docker Compose files must bind or name volumes beneath `data/runtime/`; no teammate
+commits a database, index, container volume, generated Markdown, or generated chunk file.
+
+Qdrant, Neo4j, SQLite, and their container bootstrap are not implemented yet. When added,
+their reproducible source/configuration is committed, while state remains under the ignored
+`data/runtime/` directory.

@@ -1,6 +1,6 @@
 # Architecture: ingestion milestone
 
-This milestone stops before legal parsing and chunk creation:
+The repository now exposes preparation and chunking as separate reproducible phases:
 
 ```text
 Hugging Face source tree
@@ -12,9 +12,13 @@ Hugging Face source tree
       appendix/form      → Markdown + extraction report → manual review
   → portable local Markdown view + source locators + assets
   → audit report
+  → explicit local chunk command
+      primary legal text → legal hierarchy → provision chunks
+      appendix/form      → parent-linked content chunks
 ```
 
-`data/source_packages/`, `data/derived/`, and `data/artifacts/` are intentionally ignored.
+`data/source_packages/`, `data/derived/`, `data/artifacts/`, and `data/runtime/` are
+intentionally ignored.
 Hugging Face can
 be used as a private, read-only corpus distribution channel through
 `scripts/sync_source_documents.py`. Qdrant, Neo4j, session storage, API, generation,
@@ -58,8 +62,10 @@ After cloning, a teammate runs:
 uv sync --extra dev
 uv run python scripts/sync_source_documents.py
 uv run python scripts/ingest_documents.py
+uv run python scripts/generate_chunks.py
 ```
 
-This reconstructs ignored local source snapshots, conversions, Markdown, and extraction
-artifacts. Hugging Face remains the source-only store. Future vector/graph indexes and
-container volumes must be reconstructed from the same artifacts rather than committed.
+This reconstructs ignored local source snapshots, conversions, Markdown, extraction
+artifacts, and chunks. Hugging Face remains the source-only store. Future vector/graph
+indexes and container volumes live below `data/runtime/` and must be reconstructed by
+committed source/configuration rather than committed as state.

@@ -9,9 +9,9 @@ Markdown cannot faithfully represent
 merged cells, positioned images, OLE attachments, footnote links, or run-level subscript
 and superscript semantics without extra sidecar data.
 
-The active pipeline ends at Markdown creation plus extraction evidence for this milestone.
-It does not parse or chunk and does not write Qdrant, Neo4j,
-or SQLite.
+Markdown preparation and chunk generation are separate commands. Chunk source is versioned,
+but generated hierarchies/chunks remain local and are not proof of validated legal truth.
+The project does not yet write Qdrant, Neo4j, or SQLite.
 
 Folder packages preserve the relationship between a circular and its appendices/forms.
 Identity uses the full repository-relative path plus the source hash, never the basename.
@@ -60,10 +60,9 @@ Each DOCX is transformed into an ordered block stream:
 Every block has a stable ID and an OOXML locator. Binary assets are stored separately and
 referenced by ID; binary data is never embedded in block/report JSON.
 
-## Deferred legal parsing rules
+## Legal parsing rules
 
-These are design notes for a later milestone. When enabled, parsing must run over
-validated normalized blocks, not generated Markdown.
+Parsing runs over normalized structured blocks, not generated Markdown.
 
 - Source provisions and quoted/amended provisions have separate `scope` values.
 - An amendment cue such as “bổ sung ... như sau” becomes active only when the following
@@ -74,10 +73,9 @@ validated normalized blocks, not generated Markdown.
 - Sequence validators report duplicate/out-of-order points and article gaps. They never
   rewrite legal text.
 
-## Deferred chunk contract
+## Chunk contract
 
-This section is a design proposal only and is not called by the preparation command.
-A future chunk contains the leaf provision text plus necessary parent context, source/amended
+A chunk contains the leaf provision text plus necessary parent context, source/amended
 scope, semantic labels, source block IDs, asset IDs, and source order range. Tables,
 formula placeholders, footnotes, and attachment references remain attached to the legal
 provision that owns them.
@@ -117,6 +115,13 @@ data/artifacts/
 data/derived/markdown/
   <source-relative-path>.md
   <source-parent>/_assets/<source-id>/
+
+data/derived/chunks/
+  manifest.json
+  <package-id>/<source-id>/
+    chunks.jsonl
+    hierarchy.json
+    report.json
 ```
 
 The report records extraction counts and lossy or ambiguous cases, but a successful run
