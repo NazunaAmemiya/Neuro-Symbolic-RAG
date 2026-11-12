@@ -27,9 +27,17 @@ class Settings(BaseSettings):
         default=Path("data/derived/markdown"),
         validation_alias=AliasChoices("MARKDOWN_OUTPUT_DIR"),
     )
+    chunks_output_dir: Path = Field(
+        default=Path("data/derived/chunks"),
+        validation_alias=AliasChoices("CHUNKS_OUTPUT_DIR"),
+    )
     ingest_artifacts_dir: Path = Field(
         default=Path("data/artifacts"),
         validation_alias=AliasChoices("INGEST_ARTIFACTS_DIR"),
+    )
+    runtime_data_dir: Path = Field(
+        default=Path("data/runtime"),
+        validation_alias=AliasChoices("LOCAL_RUNTIME_DIR"),
     )
 
 

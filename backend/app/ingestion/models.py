@@ -23,6 +23,22 @@ class AssetKind(StrEnum):
     ATTACHMENT = "attachment"
 
 
+class NodeKind(StrEnum):
+    DOCUMENT = "document"
+    PART = "part"
+    CHAPTER = "chapter"
+    SECTION = "section"
+    ARTICLE = "article"
+    CLAUSE = "clause"
+    POINT = "point"
+    APPENDIX = "appendix"
+
+
+class ProvisionScope(StrEnum):
+    SOURCE = "source"
+    AMENDED = "amended"
+
+
 class IssueSeverity(StrEnum):
     INFO = "info"
     WARNING = "warning"
@@ -218,3 +234,77 @@ class SourceDocument:
 
     def block_map(self) -> dict[str, DocumentBlock]:
         return {block.block_id: block for block in self.blocks}
+
+
+@dataclass(slots=True)
+class LegalNode:
+    node_id: str
+    kind: NodeKind
+    label: str
+    title: str
+    parent_id: str | None
+    start_order: int
+    end_order: int
+    scope: ProvisionScope = ProvisionScope.SOURCE
+    body_block_ids: list[str] = field(default_factory=list)
+    children: list[LegalNode] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "kind": self.kind.value,
+            "label": self.label,
+            "title": self.title,
+            "parent_id": self.parent_id,
+            "start_order": self.start_order,
+            "end_order": self.end_order,
+            "scope": self.scope.value,
+            "body_block_ids": self.body_block_ids,
+            "children": [child.to_dict() for child in self.children],
+        }
+
+
+@dataclass(slots=True)
+class LegalChunk:
+    chunk_id: str
+    document_id: str
+    node_id: str
+    level: NodeKind
+    scope: ProvisionScope
+    labels: dict[str, str]
+    display_text: str
+    embedding_text: str
+    parent_ids: list[str]
+    block_ids: list[str]
+    asset_ids: list[str]
+    source_file: str
+    source_start_order: int
+    source_end_order: int
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        payload["level"] = self.level.value
+        payload["scope"] = self.scope.value
+        return payload
+
+
+@dataclass(slots=True)
+class ContentChunk:
+    chunk_id: str
+    document_id: str
+    package_id: str | None
+    parent_document_id: str | None
+    source_role: SourceRole
+    display_text: str
+    embedding_text: str
+    block_ids: list[str]
+    asset_ids: list[str]
+    source_file: str
+    source_start_order: int
+    source_end_order: int
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["source_role"] = self.source_role.value
+        return payload

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "legal-graphrag"
 version = "0.1.0"
-description = "Legal Office-source extraction, Markdown preparation, and validation."
+description = "Legal Office extraction, Markdown preparation, validation, and local chunking."
 requires-python = ">=3.11"
 dependencies = [
   "huggingface-hub>=0.25",
