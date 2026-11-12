@@ -182,6 +182,11 @@ class ExtractionReport:
     table_count: int = 0
     image_count: int = 0
     formula_image_count: int = 0
+    formula_omml_count: int = 0
+    formula_inline_component_count: int = 0
+    formula_reviewed_paragraph_count: int = 0
+    formula_ocr_candidate_count: int = 0
+    formula_reviewed_count: int = 0
     ole_object_count: int = 0
     attachment_count: int = 0
     footnote_reference_count: int = 0
@@ -190,6 +195,7 @@ class ExtractionReport:
     subscript_span_count: int = 0
     worksheet_count: int = 0
     formula_cell_count: int = 0
+    formula_cached_value_count: int = 0
     data_validation_count: int = 0
     nonempty_cell_count: int = 0
     issues: list[IngestionIssue] = field(default_factory=list)
@@ -246,6 +252,7 @@ class LegalNode:
     start_order: int
     end_order: int
     scope: ProvisionScope = ProvisionScope.SOURCE
+    heading_block_id: str | None = None
     body_block_ids: list[str] = field(default_factory=list)
     children: list[LegalNode] = field(default_factory=list)
 
@@ -259,6 +266,7 @@ class LegalNode:
             "start_order": self.start_order,
             "end_order": self.end_order,
             "scope": self.scope.value,
+            "heading_block_id": self.heading_block_id,
             "body_block_ids": self.body_block_ids,
             "children": [child.to_dict() for child in self.children],
         }
@@ -280,6 +288,7 @@ class LegalChunk:
     source_file: str
     source_start_order: int
     source_end_order: int
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
         payload = asdict(self)

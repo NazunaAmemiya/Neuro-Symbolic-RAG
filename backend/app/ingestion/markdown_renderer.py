@@ -6,6 +6,7 @@ import re
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
+from .formula_ocr import metafile_png
 from .models import BlockKind, DocumentBlock, EmbeddedAsset, SourceDocument, TableData
 
 _LEGAL_HEADING = re.compile(
@@ -78,9 +79,7 @@ def render_markdown(document: SourceDocument, asset_links: dict[str, str] | None
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _render_worksheet(
-    blocks: list[DocumentBlock], start: int
-) -> tuple[list[str], int]:
+def _render_worksheet(blocks: list[DocumentBlock], start: int) -> tuple[list[str], int]:
     worksheet = blocks[start]
     sheet = str(worksheet.metadata.get("sheet") or worksheet.text)
     lines = [f"## Trang tính {sheet}", ""]
@@ -115,8 +114,8 @@ def _render_worksheet(
     if rows:
         lines.extend(
             [
-                "| Hàng | Ô | Nội dung | Công thức | Định dạng |",
-                "|---:|---|---|---|---|",
+                "| Hàng | Ô | Nội dung | Công thức | Kết quả lưu sẵn | Định dạng |",
+                "|---:|---|---|---|---|---|",
             ]
         )
         for row in rows:
@@ -124,12 +123,14 @@ def _render_worksheet(
             for cell in row.metadata.get("cells", []):
                 value = cell.get("value", "")
                 formula = cell.get("formula", "")
+                cached_value = cell.get("cached_value", "")
                 lines.append(
-                    "| {row} | `{coordinate}` | {value} | {formula} | `{number_format}` |".format(
+                    "| {row} | `{coordinate}` | {value} | {formula} | {cached_value} | `{number_format}` |".format(
                         row=row_number,
                         coordinate=_markdown_cell(cell.get("coordinate", "")),
                         value=_markdown_cell(value),
                         formula=_markdown_cell(formula),
+                        cached_value=_markdown_cell(cached_value),
                         number_format=_markdown_cell(cell.get("number_format", "")),
                     )
                 )
@@ -185,6 +186,16 @@ def _render_table(table: TableData) -> str:
 
 
 def _render_assets(block: DocumentBlock, asset_links: dict[str, str]) -> str:
+    if block.kind is BlockKind.FORMULA and block.metadata.get("source_type") == "omml":
+        reviewed = block.metadata.get("reviewed_latex")
+        if reviewed:
+            return f"{block.text.splitlines()[0]}\n\n> Bản phiên âm đã đối chiếu ảnh/nguồn: $${reviewed}$$"
+        candidate = str(block.metadata.get("candidate_latex") or "").strip()
+        return (
+            f"{block.text}\n\n> Bản đọc OMML chưa xác minh: $${candidate}$$"
+            if candidate
+            else f"{block.text}\n\n> Không đọc được cấu trúc OMML; cần kiểm tra DOCX gốc."
+        )
     values = []
     for asset_id in block.asset_ids:
         link = asset_links.get(asset_id)
@@ -193,8 +204,20 @@ def _render_assets(block: DocumentBlock, asset_links: dict[str, str]) -> str:
         elif block.kind in {BlockKind.IMAGE, BlockKind.FORMULA}:
             label = "Công thức" if block.kind is BlockKind.FORMULA else "Hình ảnh"
             values.append(f"![{label}]({link})")
+            original_link = asset_links.get(f"{asset_id}:original")
+            if original_link:
+                values.append(f"[Ảnh vector gốc]({original_link})")
         else:
             values.append(f"[Tệp đính kèm]({link})")
+    if block.kind is BlockKind.FORMULA:
+        reviewed = block.metadata.get("reviewed_latex")
+        candidate = block.metadata.get("ocr_candidate_latex")
+        if reviewed:
+            values.append(f"> Bản phiên âm đã đối chiếu ảnh gốc: $${reviewed}$$")
+        elif candidate:
+            values.append(f"> OCR chưa xác minh: $${candidate}$$")
+        elif block.metadata.get("ocr_status") == "failed":
+            values.append("> OCR lỗi; cần đọc ảnh gốc.")
     return "\n".join(dict.fromkeys(values)) if values else block.text
 
 
@@ -208,6 +231,15 @@ def _write_assets(
         filename = f"{asset.asset_id}-{asset.safe_filename}"
         (asset_dir / filename).write_bytes(asset.data)
         links[asset.asset_id] = quote((relative_dir / filename).as_posix(), safe="/")
+        suffix = Path(filename).suffix.casefold()
+        if suffix in {".wmf", ".emf"}:
+            try:
+                preview_name = f"{filename}.png"
+                (asset_dir / preview_name).write_bytes(metafile_png(asset.data, suffix))
+            except (OSError, RuntimeError, TimeoutError):
+                continue
+            links[f"{asset.asset_id}:original"] = links[asset.asset_id]
+            links[asset.asset_id] = quote((relative_dir / preview_name).as_posix(), safe="/")
     return links
 
 

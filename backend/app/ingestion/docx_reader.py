@@ -10,6 +10,8 @@ from zipfile import ZipFile
 
 from lxml import etree
 
+from .formula_ocr import FormulaOCR
+from .formula_reviews import FormulaReviewIndex
 from .models import (
     AssetKind,
     BlockKind,
@@ -24,9 +26,20 @@ from .models import (
     TableData,
     stable_id,
 )
+from .omml import (
+    INLINE_MATH_OPERATORS,
+    MATH_NS,
+    inline_math_component,
+    math_hash,
+    math_id,
+    math_marker,
+    to_latex,
+)
 
 NS = {
     "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "m": MATH_NS,
+    "mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
     "ct": "http://schemas.openxmlformats.org/package/2006/content-types",
     "o": "urn:schemas-microsoft-com:office:office",
     "pr": "http://schemas.openxmlformats.org/package/2006/relationships",
@@ -43,14 +56,27 @@ def _q(prefix: str, local: str) -> str:
 _FORMULA_CUE = re.compile(
     r"\b(công\s*thức|được\s+xác\s+định\s+như\s+sau|tính\s+theo)\b", re.IGNORECASE
 )
+_OMML_MARKER = re.compile(r"\[CÔNG THỨC OMML: [0-9a-f]+\]")
 _SUSPICIOUS_OPERATOR = re.compile(r"\b[A-Za-z]\s+[²³]\s*\d")
 
 
-def extract_docx(path: Path) -> SourceDocument:
+def _has_formula_cue(text: str) -> bool:
+    return bool(_FORMULA_CUE.search(_OMML_MARKER.sub("", text)))
+
+
+def extract_docx(
+    path: Path,
+    *,
+    formula_ocr: FormulaOCR | None = None,
+    formula_reviews: FormulaReviewIndex | None = None,
+    review_source_hash: str | None = None,
+) -> SourceDocument:
     """Read DOCX OOXML without flattening tables, media, footnotes, or run semantics."""
 
     source_bytes = path.read_bytes()
-    document_id = stable_id("document", path.name, sha256(source_bytes).hexdigest())
+    source_hash = sha256(source_bytes).hexdigest()
+    formula_review_source_hash = review_source_hash or source_hash
+    document_id = stable_id("document", path.name, source_hash)
     report = ExtractionReport()
     blocks: list[DocumentBlock] = []
     assets: list[EmbeddedAsset] = []
@@ -77,7 +103,7 @@ def extract_docx(path: Path) -> SourceDocument:
                 text, spans, footnote_ids = _paragraph_content(element)
                 style_name = _paragraph_style(element)
                 media = _media_descriptors(element)
-                if _FORMULA_CUE.search(text):
+                if _has_formula_cue(text):
                     formula_budget = 6
 
                 order += 1
@@ -109,16 +135,42 @@ def extract_docx(path: Path) -> SourceDocument:
                     document_id=document_id,
                     body_index=body_index,
                     start_order=order,
-                    formula_candidate=bool(_FORMULA_CUE.search(context) or formula_budget > 0),
+                    formula_candidate=_has_formula_cue(context) or formula_budget > 0,
                     report=report,
                     asset_keys=asset_keys,
+                    formula_ocr=formula_ocr,
+                    formula_reviews=formula_reviews,
+                    source_hash=formula_review_source_hash,
                 )
                 blocks.extend(media_blocks)
                 assets.extend(new_assets)
                 order += len(media_blocks)
+                math_blocks = _omml_blocks(
+                    element,
+                    document_id,
+                    body_index,
+                    order,
+                    report,
+                    formula_review_source_hash,
+                    formula_reviews,
+                )
+                blocks.extend(math_blocks)
+                order += len(math_blocks)
+                reviewed_paragraph = _reviewed_paragraph_formula(
+                    element,
+                    document_id,
+                    body_index,
+                    order + 1,
+                    report,
+                    formula_review_source_hash,
+                    formula_reviews,
+                )
+                if reviewed_paragraph is not None:
+                    blocks.append(reviewed_paragraph)
+                    order += 1
                 if media_blocks and formula_budget:
                     formula_budget -= 1
-                elif text and not _FORMULA_CUE.search(text):
+                elif text and not _has_formula_cue(text):
                     formula_budget = 0
                 if text:
                     previous_text = text
@@ -158,9 +210,12 @@ def extract_docx(path: Path) -> SourceDocument:
                     document_id=document_id,
                     body_index=body_index,
                     start_order=order,
-                    formula_candidate=bool(_FORMULA_CUE.search(previous_text)),
+                    formula_candidate=_has_formula_cue(previous_text),
                     report=report,
                     asset_keys=asset_keys,
+                    formula_ocr=formula_ocr,
+                    formula_reviews=formula_reviews,
+                    source_hash=formula_review_source_hash,
                 )
                 table_block.asset_ids.extend(
                     asset_id for block in media_blocks for asset_id in block.asset_ids
@@ -168,6 +223,17 @@ def extract_docx(path: Path) -> SourceDocument:
                 blocks.extend(media_blocks)
                 assets.extend(new_assets)
                 order += len(media_blocks)
+                math_blocks = _omml_blocks(
+                    element,
+                    document_id,
+                    body_index,
+                    order,
+                    report,
+                    formula_review_source_hash,
+                    formula_reviews,
+                )
+                blocks.extend(math_blocks)
+                order += len(math_blocks)
                 previous_text = table.as_text()
 
     return SourceDocument(
@@ -227,7 +293,15 @@ def _paragraph_content(element: etree._Element) -> tuple[str, list[InlineSpan], 
     spans: list[InlineSpan] = []
     footnotes: list[str] = []
     pieces: list[str] = []
-    for run in element.iter(_q("w", "r")):
+    for run in element.iter():
+        if run.tag == _q("m", "oMath"):
+            component = inline_math_component(run)
+            value = component or math_marker(run)
+            spans.append(InlineSpan(text=value))
+            pieces.append(value)
+            continue
+        if run.tag != _q("w", "r"):
+            continue
         run_properties = run.find("w:rPr", namespaces=NS)
         bold = _on(run_properties, "b")
         italic = _on(run_properties, "i")
@@ -238,7 +312,7 @@ def _paragraph_content(element: etree._Element) -> tuple[str, list[InlineSpan], 
                 vertical = vertical_element.get(_q("w", "val"))
         run_pieces: list[str] = []
         for child in run.iterchildren():
-            if child.tag in {_q("w", "t"), _q("w", "instrText")}:
+            if child.tag == _q("w", "t"):
                 run_pieces.append(child.text or "")
             elif child.tag == _q("w", "tab"):
                 run_pieces.append("\t")
@@ -250,6 +324,12 @@ def _paragraph_content(element: etree._Element) -> tuple[str, list[InlineSpan], 
                     footnotes.append(note_id)
                     run_pieces.append(f"[^{note_id}]")
         run_text = "".join(run_pieces)
+        image_component = None
+        if not run_text and run.find(".//v:textbox", namespaces=NS) is None:
+            image_component = _equation_image_component(run)
+            run_text = image_component or ""
+        if image_component and pieces and pieces[-1] == image_component:
+            continue
         if run_text:
             spans.append(
                 InlineSpan(
@@ -261,7 +341,102 @@ def _paragraph_content(element: etree._Element) -> tuple[str, list[InlineSpan], 
                 )
             )
             pieces.append(run_text)
+    if element.find(".//mc:AlternateContent", namespaces=NS) is not None:
+        pieces = _collapse_duplicate_halves(pieces)
+        spans = _collapse_duplicate_halves(spans)
     return "".join(pieces), spans, footnotes
+
+
+def _collapse_duplicate_halves(values: list) -> list:
+    midpoint = len(values) // 2
+    if midpoint and len(values) % 2 == 0 and values[:midpoint] == values[midpoint:]:
+        return values[:midpoint]
+    return values
+
+
+def _omml_blocks(
+    element: etree._Element,
+    document_id: str,
+    body_index: int,
+    start_order: int,
+    report: ExtractionReport,
+    source_hash: str,
+    formula_reviews: FormulaReviewIndex | None,
+) -> list[DocumentBlock]:
+    result: list[DocumentBlock] = []
+    for index, math in enumerate(element.iter(_q("m", "oMath")), start=1):
+        if inline_math_component(math):
+            report.formula_inline_component_count += 1
+            continue
+        marker = math_marker(math)
+        content_hash = math_hash(math)
+        review = formula_reviews.get(source_hash, content_hash) if formula_reviews else None
+        locator = f"word/document.xml#body[{body_index}]//m:oMath[{index}]"
+        block = DocumentBlock(
+            block_id=stable_id(document_id, "omml", str(body_index), str(index)),
+            kind=BlockKind.FORMULA,
+            order=start_order + index,
+            text=f"{marker}\n{review.latex}" if review else marker,
+            locator=locator,
+            metadata={
+                "source_type": "omml",
+                "formula_id": math_id(math),
+                "content_sha256": content_hash,
+                "candidate_latex": to_latex(math),
+                "reviewed_latex": review.latex if review else None,
+                "reviewer": review.reviewer if review else None,
+                "review_status": "reviewed_visual" if review else "unverified",
+                "omml_xml": etree.tostring(math, encoding="unicode"),
+            },
+        )
+        result.append(block)
+        report.formula_omml_count += 1
+        if review:
+            report.formula_reviewed_count += 1
+        else:
+            report.issues.append(
+                IngestionIssue(
+                    code="omml_formula_requires_review",
+                    severity=IssueSeverity.WARNING,
+                    message="OMML equation was preserved and transcribed as an unverified candidate.",
+                    locator=locator,
+                    block_id=block.block_id,
+                )
+            )
+    return result
+
+
+def _reviewed_paragraph_formula(
+    element: etree._Element,
+    document_id: str,
+    body_index: int,
+    order: int,
+    report: ExtractionReport,
+    source_hash: str,
+    formula_reviews: FormulaReviewIndex | None,
+) -> DocumentBlock | None:
+    if formula_reviews is None:
+        return None
+    content_hash = sha256(etree.tostring(element, method="c14n")).hexdigest()
+    review = formula_reviews.get(source_hash, content_hash)
+    if review is None:
+        return None
+    report.formula_reviewed_count += 1
+    report.formula_reviewed_paragraph_count += 1
+    return DocumentBlock(
+        block_id=stable_id(document_id, "reviewed-paragraph-formula", str(body_index)),
+        kind=BlockKind.FORMULA,
+        order=order,
+        text=f"[CÔNG THỨC TRONG BỐ CỤC WORD]\n{review.latex}",
+        locator=f"word/document.xml#body[{body_index}]/p",
+        metadata={
+            "source_type": "reviewed_paragraph",
+            "content_sha256": content_hash,
+            "reviewed_latex": review.latex,
+            "reviewer": review.reviewer,
+            "review_status": "reviewed_visual",
+        },
+    )
 
 
 def _on(properties: etree._Element | None, local_name: str) -> bool:
@@ -293,6 +468,9 @@ def _media_descriptors(element: etree._Element) -> list[dict[str, str]]:
         elif descendant.tag == _q("v", "imagedata"):
             rel_id = descendant.get(_q("r", "id"))
             descriptor = {"relationship_id": rel_id or "", "type": "image"}
+            component = _equation_image_component(descendant)
+            if component:
+                descriptor["inline_math_component"] = component
         elif descendant.tag == _q("o", "OLEObject"):
             rel_id = descendant.get(_q("r", "id"))
             descriptor = {
@@ -322,6 +500,9 @@ def _materialize_media(
     formula_candidate: bool,
     report: ExtractionReport,
     asset_keys: dict[tuple[str, AssetKind], EmbeddedAsset],
+    formula_ocr: FormulaOCR | None,
+    formula_reviews: FormulaReviewIndex | None,
+    source_hash: str,
 ) -> tuple[list[DocumentBlock], list[EmbeddedAsset]]:
     blocks: list[DocumentBlock] = []
     new_assets: list[EmbeddedAsset] = []
@@ -342,9 +523,13 @@ def _materialize_media(
         if package_path not in package.namelist():
             continue
         data = package.read(package_path)
+        content_hash = sha256(data).hexdigest()
         content_type = content_types.get(package_path) or None
         is_package = descriptor["type"] == "ole" and descriptor.get("prog_id") == "Package"
-        if descriptor["type"] == "image":
+        inline_component = descriptor.get("inline_math_component")
+        if descriptor["type"] == "image" and inline_component:
+            kind = AssetKind.IMAGE
+        elif descriptor["type"] == "image":
             kind = AssetKind.FORMULA_IMAGE if formula_candidate else AssetKind.IMAGE
         elif is_package:
             kind = AssetKind.ATTACHMENT
@@ -372,20 +557,48 @@ def _materialize_media(
             asset_keys[key] = asset
             new_assets.append(asset)
             if kind is AssetKind.FORMULA_IMAGE:
+                review = formula_reviews.get(source_hash, content_hash) if formula_reviews else None
+                if review:
+                    asset.metadata["reviewed_latex"] = review.latex
+                    asset.metadata["reviewer"] = review.reviewer
+                    report.formula_reviewed_count += 1
+                asset.metadata["ocr_status"] = "not_run"
+                if formula_ocr is not None:
+                    try:
+                        candidate = formula_ocr.recognize(data, filename)
+                        if candidate:
+                            asset.metadata["ocr_candidate_latex"] = candidate
+                            asset.metadata["ocr_status"] = "unverified"
+                            report.formula_ocr_candidate_count += 1
+                        else:
+                            asset.metadata["ocr_status"] = "empty_result"
+                    except Exception as exc:  # noqa: BLE001 - one failed OCR must not abort corpus ingest
+                        asset.metadata["ocr_status"] = "failed"
+                        report.issues.append(
+                            IngestionIssue(
+                                code="formula_ocr_failed",
+                                severity=IssueSeverity.WARNING,
+                                message=f"Local formula OCR failed: {type(exc).__name__}: {exc}",
+                                locator=f"word/document.xml#body[{body_index}]",
+                            )
+                        )
                 report.formula_image_count += 1
-                report.issues.append(
-                    IngestionIssue(
-                        code="formula_image_requires_transcription",
-                        severity=IssueSeverity.WARNING,
-                        message=(
-                            "Formula is stored as an image. The image was preserved; a reviewed "
-                            "transcription is required before its text is used for retrieval."
-                        ),
-                        locator=f"word/document.xml#body[{body_index}]",
+                if not review:
+                    report.issues.append(
+                        IngestionIssue(
+                            code="formula_image_requires_transcription",
+                            severity=IssueSeverity.WARNING,
+                            message=(
+                                "Formula is stored as an image. The image was preserved; a reviewed "
+                                "transcription is required before its text is used for retrieval."
+                            ),
+                            locator=f"word/document.xml#body[{body_index}]",
+                        )
                     )
-                )
             elif kind is AssetKind.IMAGE:
                 report.image_count += 1
+                if inline_component:
+                    report.formula_inline_component_count += 1
             elif kind is AssetKind.ATTACHMENT:
                 report.attachment_count += 1
                 _extract_native_attachment(asset, document_id, new_assets, report)
@@ -395,24 +608,79 @@ def _materialize_media(
         if kind is AssetKind.FORMULA_IMAGE:
             block_kind = BlockKind.FORMULA
             text = f"[CÔNG THỨC DẠNG ẢNH: {asset.asset_id}]"
+            if asset.metadata.get("reviewed_latex"):
+                text += f"\n{asset.metadata['reviewed_latex']}"
         elif kind is AssetKind.IMAGE:
             block_kind = BlockKind.IMAGE
-            text = f"[HÌNH ẢNH: {asset.asset_id}]"
+            text = (
+                f"[THÀNH PHẦN CÔNG THỨC DẠNG ẢNH: {inline_component}]"
+                if inline_component
+                else f"[HÌNH ẢNH: {asset.asset_id}]"
+            )
         else:
             block_kind = BlockKind.ATTACHMENT
             text = f"[TỆP ĐÍNH KÈM: {asset.safe_filename}]"
         blocks.append(
             DocumentBlock(
-                block_id=stable_id(document_id, "media", str(body_index), str(offset), asset.asset_id),
+                block_id=stable_id(
+                    document_id, "media", str(body_index), str(offset), asset.asset_id
+                ),
                 kind=block_kind,
                 order=start_order + len(blocks) + 1,
                 text=text,
                 locator=f"word/document.xml#body[{body_index}]/media[{offset}]",
                 asset_ids=[asset.asset_id],
-                metadata={"relationship_id": rel_id},
+                metadata={
+                    "relationship_id": rel_id,
+                    **(
+                        {
+                            "source_type": "image",
+                            "review_status": (
+                                "reviewed_visual"
+                                if asset.metadata.get("reviewed_latex")
+                                else "unverified"
+                            ),
+                            "ocr_status": asset.metadata.get("ocr_status", "not_run"),
+                            "ocr_candidate_latex": asset.metadata.get("ocr_candidate_latex"),
+                            "reviewed_latex": asset.metadata.get("reviewed_latex"),
+                            "reviewer": asset.metadata.get("reviewer"),
+                        }
+                        if kind is AssetKind.FORMULA_IMAGE
+                        else {}
+                    ),
+                },
             )
         )
     return blocks, new_assets
+
+
+def _equation_image_component(element: etree._Element) -> str | None:
+    """Read a one-character equation stored as a legacy Word picture field."""
+
+    candidates = []
+    if element.tag == _q("v", "shape"):
+        candidates.append(element)
+    candidates.extend(element.findall(".//v:shape", namespaces=NS))
+    candidates.extend(element.xpath("ancestor::v:shape", namespaces=NS))
+    for shape in candidates:
+        equation_xml = shape.get("equationxml") or ""
+        if not equation_xml:
+            continue
+        try:
+            root = etree.fromstring(equation_xml.encode("utf-8"))
+            values = [
+                (item.text or "").strip()
+                for item in root.iter()
+                if etree.QName(item).namespace == MATH_NS
+                and etree.QName(item).localname == "t"
+                and (item.text or "").strip()
+            ]
+        except etree.XMLSyntaxError:
+            values = re.findall(r"<m:t[^>]*>([^<]+)</m:t>", equation_xml)
+        value = "".join(values).strip()
+        if value in INLINE_MATH_OPERATORS:
+            return value
+    return None
 
 
 def _extract_native_attachment(
@@ -515,7 +783,11 @@ def _table_data(table_element: etree._Element, report: ExtractionReport) -> Tabl
         continued_columns: set[int] = set()
         for tc in row.findall("w:tc", namespaces=NS):
             grid_span_element = tc.find("w:tcPr/w:gridSpan", namespaces=NS)
-            column_span = int(grid_span_element.get(_q("w", "val"), "1")) if grid_span_element is not None else 1
+            column_span = (
+                int(grid_span_element.get(_q("w", "val"), "1"))
+                if grid_span_element is not None
+                else 1
+            )
             vertical_element = tc.find("w:tcPr/w:vMerge", namespaces=NS)
             vertical_value = (
                 vertical_element.get(_q("w", "val"), "continue")
@@ -573,7 +845,10 @@ def _table_data(table_element: etree._Element, report: ExtractionReport) -> Tabl
                     report.merged_cell_count += 1
             column += column_span
         for active_column in tuple(active_vertical):
-            if active_column not in continued_columns and active_vertical[active_column].row < row_index:
+            if (
+                active_column not in continued_columns
+                and active_vertical[active_column].row < row_index
+            ):
                 del active_vertical[active_column]
         max_columns = max(max_columns, column)
 

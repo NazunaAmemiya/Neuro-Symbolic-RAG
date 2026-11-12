@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3", "ruff>=0.7"]
+formula-ocr = ["pix2tex>=0.1.4", "Pillow>=9.1"]
 
 [tool.setuptools.packages.find]
 include = ["backend*"]

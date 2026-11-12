@@ -35,6 +35,7 @@ def test_xlsx_reader_preserves_formula_merge_and_validation(tmp_path) -> None:
 
     assert document.report.worksheet_count == 1
     assert document.report.formula_cell_count == 1
+    assert document.report.merged_cell_count == 1
     assert document.report.data_validation_count == 1
     assert document.report.image_count == 1
     assert document.assets[0].package_path == "xl/media/unreferenced-review-image.png"
@@ -71,3 +72,13 @@ def test_workbook_is_prepared_without_downstream_processing(tmp_path) -> None:
     assert all(chunk.package_id == "07_2024_TT-BKHDT" for chunk in chunks)
     assert all(chunk.source_role is SourceRole.FORM_WORKBOOK for chunk in chunks)
     assert all(chunk.parent_document_id == entry.parent_document_id for chunk in chunks)
+    formula_chunk = next(chunk for chunk in chunks if "C3" in chunk.display_text)
+    assert "=B3*2" in formula_chunk.display_text
+    payload = next(
+        block
+        for block in formula_chunk.metadata["blocks"]
+        if block["block_id"] in formula_chunk.block_ids
+    )
+    assert next(cell for cell in payload["metadata"]["cells"] if cell["coordinate"] == "C3")[
+        "formula"
+    ] == "=B3*2"

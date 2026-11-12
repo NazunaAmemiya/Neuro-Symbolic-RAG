@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from .extractors import extract_document
+from .formula_ocr import FormulaOCR
+from .formula_reviews import FormulaReviewIndex
 from .models import SourceDocument
 from .normalizer import normalize_document
 from .source_catalog import CorpusEntry
@@ -12,6 +14,8 @@ def prepare_entry_document(
     entry: CorpusEntry,
     *,
     conversion_dir: Path = Path("data/derived/conversions"),
+    formula_ocr: FormulaOCR | None = None,
+    formula_reviews: FormulaReviewIndex | None = None,
 ) -> SourceDocument:
     """Extract and normalize one catalog entry without parsing or chunking it."""
 
@@ -19,6 +23,8 @@ def prepare_entry_document(
         entry.path,
         conversion_dir=conversion_dir,
         source_hash=entry.source_hash,
+        formula_ocr=formula_ocr,
+        formula_reviews=formula_reviews,
     )
     document.document_id = entry.source_id
     document.source_file = entry.relative_path

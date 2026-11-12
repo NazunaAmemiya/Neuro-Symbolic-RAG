@@ -13,8 +13,10 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from backend.app.core.settings import get_settings
+from backend.app.ingestion.formula_ocr import Pix2TexOCR
+from backend.app.ingestion.formula_reviews import load_formula_reviews
 from backend.app.ingestion.markdown_renderer import write_markdown_view
-from backend.app.ingestion.models import SourceDocument, SourceFormat, SourceRole
+from backend.app.ingestion.models import BlockKind, SourceDocument, SourceFormat, SourceRole
 from backend.app.ingestion.pipeline import prepare_entry_document
 from backend.app.ingestion.source_catalog import build_source_catalog
 
@@ -24,12 +26,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-dir", type=Path, default=Path(settings.source_docs_dir))
     parser.add_argument("--output-dir", type=Path, default=Path(settings.ingest_artifacts_dir))
-    parser.add_argument(
-        "--conversion-dir", type=Path, default=Path(settings.converted_docs_dir)
-    )
-    parser.add_argument(
-        "--markdown-dir", type=Path, default=Path(settings.markdown_output_dir)
-    )
+    parser.add_argument("--conversion-dir", type=Path, default=Path(settings.converted_docs_dir))
+    parser.add_argument("--markdown-dir", type=Path, default=Path(settings.markdown_output_dir))
     parser.add_argument(
         "--no-markdown",
         action="store_true",
@@ -40,7 +38,23 @@ def main() -> None:
         action="store_true",
         help="Ignore legacy Markdown/text even if they are present below source-dir.",
     )
+    parser.add_argument(
+        "--formula-ocr",
+        choices=("off", "pix2tex"),
+        default="off",
+        help="Optional local math OCR; predictions always require review.",
+    )
+    parser.add_argument(
+        "--formula-reviews",
+        type=Path,
+        help="Local JSON with source-bound, visually reviewed formula transcriptions.",
+    )
     args = parser.parse_args()
+    try:
+        formula_ocr = Pix2TexOCR() if args.formula_ocr == "pix2tex" else None
+    except RuntimeError as exc:
+        parser.error(str(exc))
+    formula_reviews = load_formula_reviews(args.formula_reviews) if args.formula_reviews else None
 
     source_entries = build_source_catalog(args.source_dir)
     if args.docx_only:
@@ -53,7 +67,12 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     manifest: list[dict[str, object]] = []
     for entry in source_entries:
-        document = prepare_entry_document(entry, conversion_dir=args.conversion_dir)
+        document = prepare_entry_document(
+            entry,
+            conversion_dir=args.conversion_dir,
+            formula_ocr=formula_ocr,
+            formula_reviews=formula_reviews,
+        )
         artifact_relative_dir = Path(entry.package_id) / entry.source_id
         document_dir = args.output_dir / artifact_relative_dir
         assets_dir = document_dir / "assets"
@@ -143,8 +162,16 @@ def _validation_state(document: SourceDocument) -> dict[str, object]:
         reasons.append("no_reference_validation_for_appendix_or_form")
     if document.source_format is SourceFormat.XLSX:
         reasons.append("spreadsheet_layout_and_formula_results_require_review")
-    if document.report.formula_image_count:
+    unreviewed = [
+        block
+        for block in document.blocks
+        if block.kind is BlockKind.FORMULA
+        and block.metadata.get("review_status") != "reviewed_visual"
+    ]
+    if any(block.metadata.get("source_type") == "image" for block in unreviewed):
         reasons.append("formula_images_require_human_transcription_review")
+    if any(block.metadata.get("source_type") == "omml" for block in unreviewed):
+        reasons.append("omml_candidates_require_visual_review")
     if document.report.attachment_count or document.report.ole_object_count:
         reasons.append("embedded_payloads_require_recursive_review")
     return {

@@ -163,6 +163,7 @@ def parse_hierarchy(document: SourceDocument) -> tuple[LegalNode, list[Ingestion
                     start_order=block.order,
                     end_order=block.order,
                     scope=scope,
+                    heading_block_id=block.block_id,
                 )
                 parent.children.append(node)
                 if scope is ProvisionScope.AMENDED:

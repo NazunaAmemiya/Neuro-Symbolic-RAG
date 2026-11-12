@@ -80,14 +80,26 @@ scope, semantic labels, source block IDs, asset IDs, and source order range. Tab
 formula placeholders, footnotes, and attachment references remain attached to the legal
 provision that owns them.
 
-Formula OCR output must not be used as authoritative text until reviewed. For now, formula
-images are preserved and produce an explicit `formula_image_requires_transcription`
-warning. Extracted OLE payloads similarly produce a notice because recursive ingestion of
+Formula OCR output must not be used as authoritative text until reviewed. OMML equations
+are preserved with an unverified LaTeX candidate and an inline marker at their DOCX
+position, including inside table cells. Formula images preserve their original bytes and
+optionally carry a local pix2tex candidate. WMF/EMF images get a PNG Markdown preview on
+Windows while the vector original remains available. All candidates remain out of block
+text and downstream embedding text. `scripts/audit_formulas.py` checks OMML coverage and
+image byte identity, then produces a local review queue. It cannot certify the equation's
+meaning; images classified as ordinary images may also require visual review. A separate,
+ignored `formula_reviews.json` can supply transcriptions checked against source images.
+Reviews are keyed by the DOCX and media/OMML SHA-256 hashes; stale reviews never replace
+source content. The whole document remains `requires_review` until all content classes
+have been checked. Extracted OLE
+payloads similarly produce a notice because recursive ingestion of
 the attached DOCX/PDF/XLSX is a separate next step.
 
 XLSX form workbooks are routed separately from legal provisions. The reader records sheet
-names, populated cells, merged ranges, formulas, data validations, and images. Formula
-expressions remain metadata and are not evaluated or embedded as legal conclusions.
+names, populated cells, merged ranges, formulas, cached formula results, hidden
+rows/columns, data validations, and images. Formula expressions remain metadata and are
+not evaluated or embedded as legal conclusions. `scripts/audit_xlsx_fidelity.py` compares
+those fields and packaged media byte-for-byte against the source workbook.
 
 ## Markdown view
 
@@ -97,8 +109,29 @@ mirror the Hugging Face source hierarchy and all media links are relative, so an
 developer can regenerate the same layout in a different clone location.
 
 DOCX tables use embedded HTML when row/column spans are present. XLSX sheets use an
-explicit coordinate/value/formula table so sparse cells and formulas are not mistaken for
-a simple rectangular text table.
+explicit coordinate/value/formula/cached-result table so sparse cells and formulas are not
+mistaken for a simple rectangular text table.
+
+Run the structural audit against a downloaded Hugging Face snapshot with
+`python scripts/audit_markdown_fidelity.py`. The audit compares source hashes, source
+body tables, rendered tables, image links, and copied image bytes. It cannot determine
+whether a raster image is a mathematical formula, read its expression, or certify layout
+and reading order. It now rejects a preparation manifest that omits local Office source
+files. This only proves coverage of the local snapshot; confirm that the snapshot contains
+every file at the intended Hugging Face revision. The formula audit handles DOCX and lists
+skipped DOC/XLSX files. `scripts/audit_hf_coverage.py` compares the local source and
+preparation manifest against the Hugging Face file list at a pinned revision, including
+every file in a form/appendix folder. Review original Office files where those distinctions
+matter.
+
+The legal chunker associates every ordered block, including headings attached to nonleaf
+nodes, with exactly one output chunk. Tables and formulas are standalone chunks retaining
+cell spans, source locators, legal context, assets, and transcription status. Appendix,
+form, and workbook chunks retain package and parent-document linkage; XLSX table chunks
+also retain exact cell formulas and cached results. `scripts/audit_chunks.py` rejects
+missing, duplicate, or unknown block references and any table/formula/linkage mismatch.
+Repeated letterhead tables are currently preserved. They may be excluded from retrieval
+only after an explicit, audited metadata classification; formula text is never invented.
 
 ## Artifact layout
 

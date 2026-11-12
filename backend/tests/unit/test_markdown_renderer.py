@@ -66,6 +66,7 @@ def test_markdown_view_uses_portable_paths_and_copies_assets(tmp_path) -> None:
                         {
                             "coordinate": "C1",
                             "formula": "=SUM(A1:B1)",
+                            "cached_value": 42,
                             "number_format": "0",
                         },
                     ],
@@ -91,6 +92,7 @@ def test_markdown_view_uses_portable_paths_and_copies_assets(tmp_path) -> None:
     assert "source_path: \"Bidding_Law/07_2024_TT-BKHDT/form.xlsx\"" in content
     assert str(tmp_path) not in content
     assert "=SUM(A1:B1)" in content
+    assert "| 42 | `0` |" in content
     assert "_assets/source-1/image-1-image%201.png" in content
     assert (
         path.parent / "_assets" / "source-1" / "image-1-image 1.png"

@@ -5,6 +5,8 @@ from pathlib import Path
 
 from .doc_converter import convert_doc_to_docx
 from .docx_reader import extract_docx
+from .formula_ocr import FormulaOCR
+from .formula_reviews import FormulaReviewIndex
 from .models import SourceDocument, SourceFormat, stable_id
 from .xlsx_reader import extract_xlsx
 
@@ -16,6 +18,8 @@ def extract_document(
     *,
     conversion_dir: Path = Path("data/derived/conversions"),
     source_hash: str | None = None,
+    formula_ocr: FormulaOCR | None = None,
+    formula_reviews: FormulaReviewIndex | None = None,
 ) -> SourceDocument:
     """Extract an auditable block stream from supported legal source formats."""
 
@@ -26,7 +30,12 @@ def extract_document(
     if suffix == ".doc":
         digest = source_hash or sha256(path.read_bytes()).hexdigest()
         converted_path = convert_doc_to_docx(path, conversion_dir, digest)
-        document = extract_docx(converted_path)
+        document = extract_docx(
+            converted_path,
+            formula_ocr=formula_ocr,
+            formula_reviews=formula_reviews,
+            review_source_hash=digest,
+        )
         document.source_file = path.name
         document.source_format = SourceFormat.DOC
         try:
@@ -37,7 +46,7 @@ def extract_document(
         document.metadata["original_source_hash"] = digest
         return document
     if suffix == ".docx":
-        return extract_docx(path)
+        return extract_docx(path, formula_ocr=formula_ocr, formula_reviews=formula_reviews)
     if suffix == ".xlsx":
         return extract_xlsx(path)
 

@@ -33,6 +33,7 @@ def extract_xlsx(path: Path) -> SourceDocument:
     assets: list[EmbeddedAsset] = []
     asset_hashes: set[str] = set()
     workbook = load_workbook(path, data_only=False, read_only=False, keep_links=True)
+    cached_workbook = load_workbook(path, data_only=True, read_only=False, keep_links=True)
     sheet_names = list(workbook.sheetnames)
     order = 0
 
@@ -42,6 +43,15 @@ def extract_xlsx(path: Path) -> SourceDocument:
             validations = _validations(worksheet)
             report.data_validation_count += len(validations)
             merged_ranges = [str(value) for value in worksheet.merged_cells.ranges]
+            report.merged_cell_count += len(merged_ranges)
+            hidden_rows = sorted(
+                index for index, dimension in worksheet.row_dimensions.items() if dimension.hidden
+            )
+            hidden_columns = sorted(
+                index
+                for index, dimension in worksheet.column_dimensions.items()
+                if dimension.hidden
+            )
             order += 1
             blocks.append(
                 DocumentBlock(
@@ -57,6 +67,12 @@ def extract_xlsx(path: Path) -> SourceDocument:
                         "dimension": worksheet.calculate_dimension(),
                         "merged_ranges": merged_ranges,
                         "data_validations": validations,
+                        "hidden_rows": hidden_rows,
+                        "hidden_columns": hidden_columns,
+                        "freeze_panes": str(worksheet.freeze_panes)
+                        if worksheet.freeze_panes
+                        else None,
+                        "auto_filter": worksheet.auto_filter.ref,
                         "print_area": str(worksheet.print_area) if worksheet.print_area else None,
                     },
                 )
@@ -86,6 +102,10 @@ def extract_xlsx(path: Path) -> SourceDocument:
                     if is_formula:
                         report.formula_cell_count += 1
                         metadata["formula"] = str(value)
+                        cached_value = cached_workbook[worksheet.title][cell.coordinate].value
+                        if cached_value is not None:
+                            metadata["cached_value"] = _json_value(cached_value)
+                            report.formula_cached_value_count += 1
                         formula_coordinates.append(cell.coordinate)
                     else:
                         metadata["value"] = _json_value(value)
@@ -149,6 +169,7 @@ def extract_xlsx(path: Path) -> SourceDocument:
                 )
     finally:
         workbook.close()
+        cached_workbook.close()
 
     archive_counts = _archive_assets(
         path=path,

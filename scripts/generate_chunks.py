@@ -15,6 +15,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
 from backend.app.core.settings import get_settings
 from backend.app.ingestion.chunker import build_chunks
 from backend.app.ingestion.content_chunker import build_content_chunks
+from backend.app.ingestion.formula_reviews import load_formula_reviews
 from backend.app.ingestion.models import SourceFormat, SourceRole
 from backend.app.ingestion.parser import parse_hierarchy
 from backend.app.ingestion.pipeline import prepare_entry_document
@@ -37,7 +38,21 @@ def main() -> None:
         action="store_true",
         help="Process only DOCX sources (useful for the legacy 31-document mock corpus).",
     )
+    parser.add_argument(
+        "--formula-reviews",
+        type=Path,
+        help=(
+            "Local source-bound formula reviews. When omitted, "
+            "data/derived/formula_reviews.json is used if present."
+        ),
+    )
     args = parser.parse_args()
+
+    review_path = args.formula_reviews
+    default_review_path = Path("data/derived/formula_reviews.json")
+    if review_path is None and default_review_path.is_file():
+        review_path = default_review_path
+    formula_reviews = load_formula_reviews(review_path) if review_path else None
 
     entries = build_source_catalog(args.source_dir)
     if args.docx_only:
@@ -57,7 +72,11 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     manifest: list[dict[str, object]] = []
     for entry in entries:
-        document = prepare_entry_document(entry, conversion_dir=args.conversion_dir)
+        document = prepare_entry_document(
+            entry,
+            conversion_dir=args.conversion_dir,
+            formula_reviews=formula_reviews,
+        )
         issues = list(document.report.issues)
         hierarchy = None
         if document.source_role is SourceRole.PRIMARY_LEGAL_DOCUMENT:
