@@ -1,74 +1,120 @@
 # Legal GraphRAG
 
-This repository is being rebuilt as a Legal GraphRAG system for Vietnamese legal
-documents. Markdown preparation and chunk generation are reproducible local phases.
-Embedding and indexing remain deferred.
+## Tổng quan
 
-## Current scope
+Dự án xây dựng hệ thống Legal GraphRAG cho văn bản pháp luật Việt Nam. Giai đoạn hiện tại
+tập trung vào việc chuẩn hóa dữ liệu nguồn, chuyển đổi tài liệu Office sang biểu diễn có
+thể kiểm tra, và chia nội dung thành các chunk phục vụ cho bước truy xuất sau này.
 
-```text
-Hugging Face Office sources
-  → extraction + normalization
-  → local Markdown + validation evidence
-  → local legal/content chunks
-```
-
-Shared source packages accept only `.doc`, `.docx`, and `.xlsx`. Generated Markdown is
-never rediscovered as a source. Legacy DOC files are
-converted to hash-addressed DOCX derivatives and checked against Word structural metrics.
-XLSX forms are read without flattening sheets, merged ranges, formulas, or validations.
-
-## Repository layout
+Quy trình dữ liệu hiện có:
 
 ```text
-backend/app/core/          settings
-backend/app/ingestion/     extraction, normalization, parsing, and chunk source
-backend/tests/             extraction, rendering, parser, and chunk tests
-scripts/                   corpus sync, Markdown preparation, local chunk generation
-data/source_packages/      ignored Hugging Face source tree
-data/derived/conversions/  ignored DOC conversion cache
-data/derived/markdown/     ignored portable Markdown views and assets
-data/derived/chunks/       ignored generated chunks and hierarchy
-data/artifacts/            ignored blocks, reports, and validation queue
-data/runtime/              ignored database/container volumes
-docs/                      architecture notes
+Tài liệu Office trên Hugging Face
+  → trích xuất và chuẩn hóa
+  → Markdown và bằng chứng kiểm tra trên máy local
+  → chunk pháp lý, phụ lục và biểu mẫu trên máy local
 ```
 
-Future modules for Qdrant, Neo4j, API, frontend, sessions, tracing, and evaluation
-are intentionally deferred until ingestion is validated.
+Kho dữ liệu nguồn chấp nhận `.doc`, `.docx` và `.xlsx`. Các tệp Markdown, conversion,
+chunk, báo cáo kiểm tra và dữ liệu runtime đều được sinh lại trên từng máy và không được
+đưa lên GitHub.
 
-## Teammate bootstrap: clone to review-ready data
+## Phạm vi hiện tại
 
-The full legacy `.doc` audit path requires Windows, PowerShell, and Microsoft Word. Word
-is used to create hash-addressed `.docx` derivatives and to compare structural metrics
-before and after conversion. The command fails rather than silently selecting a different
-converter when Word is unavailable. Install Git, Python 3.11, and `uv`, then run:
+- Đồng bộ corpus Office từ Hugging Face.
+- Chuyển `.doc` cũ sang `.docx` bằng Microsoft Word và kiểm tra chỉ số cấu trúc trước/sau.
+- Trích xuất đoạn văn, bảng, ảnh, công thức, footnote và attachment.
+- Giữ cấu trúc sheet, merged range, công thức, cached value và data validation của XLSX.
+- Sinh Markdown theo đúng cây thư mục nguồn, sử dụng đường dẫn tương đối.
+- Chia văn bản luật theo Điều/Khoản/Điểm và chia phụ lục, biểu mẫu theo cửa sổ nội dung.
+- Kiểm tra coverage của nguồn, Markdown, bảng, công thức, workbook và chunks.
+
+Embedding, Qdrant, Neo4j, API và giao diện chưa nằm trong phạm vi triển khai hiện tại.
+
+## Yêu cầu hệ thống
+
+- Windows và PowerShell.
+- Microsoft Word, dùng cho quá trình chuyển đổi `.doc → .docx`.
+- Git.
+- Python 3.11.
+- `uv` để quản lý môi trường và dependency.
+
+Pipeline sẽ dừng nếu máy không có Microsoft Word; hệ thống không tự động chuyển sang một
+converter khác vì kết quả có thể khác giữa các máy.
+
+## Cấu trúc thư mục
+
+```text
+backend/app/core/          cấu hình ứng dụng
+backend/app/ingestion/     trích xuất, chuẩn hóa, parser và chunker
+backend/tests/             unit test cho ingestion và chunking
+scripts/                   lệnh đồng bộ, ingest, audit và sinh chunks
+docs/                      tài liệu kiến trúc và thiết kế ingestion
+
+data/source_packages/      corpus Office tải từ Hugging Face
+data/derived/conversions/  DOCX chuyển đổi từ DOC và báo cáo conversion
+data/derived/markdown/     Markdown và media đã trích xuất
+data/derived/chunks/       chunks, hierarchy và manifest
+data/artifacts/            block JSON, báo cáo extraction và validation queue
+data/runtime/              dữ liệu database và container trong tương lai
+```
+
+Toàn bộ nội dung dưới `data/` được sinh trên local và đã được cấu hình ignore, ngoại trừ
+các tệp `.gitkeep` dùng để giữ cấu trúc thư mục.
+
+## Review-ready data
+
+### 1. Clone repository
 
 ```powershell
 git clone https://github.com/NazunaAmemiya/Neuro-Symbolic-RAG.git
 Set-Location Neuro-Symbolic-RAG
 git pull --ff-only
+```
 
+### 2. Cấu hình môi trường
+
+```powershell
 Copy-Item .env.example .env
 notepad .env
 ```
 
-Set the Hugging Face dataset in `.env`. Add `HF_TOKEN` only when the dataset requires
-authentication; never commit the token:
+Khai báo dataset Hugging Face trong `.env`. Chỉ điền `HF_TOKEN` khi dataset yêu cầu xác
+thực và không commit token vào repository.
 
 ```dotenv
 HF_REPO_ID=AmemiyaNazuna/Bidding_Law
 HF_TOKEN=
 ```
 
-Create the environment, download the source-only corpus, and generate fresh unreviewed
-local inspection data:
+Cài dependency bằng Python 3.11:
 
 ```powershell
 uv sync --python 3.11 --extra dev
+```
+
+### 3. Đồng bộ và chuẩn bị dữ liệu
+
+```powershell
 uv run python scripts/sync_source_documents.py
 uv run python scripts/ingest_documents.py
+```
 
+Hai lệnh trên tạo đầy đủ dữ liệu cần thiết để kiểm tra:
+
+```text
+data/source_packages/       tài liệu Office gốc từ Hugging Face
+data/derived/conversions/   DOCX chuyển đổi và *.conversion.json
+data/derived/markdown/      Markdown và media đi kèm
+data/artifacts/             blocks.jsonl, report.json và validation_summary.json
+```
+
+Mỗi file `.doc` được chuyển sang một DOCX có tên dựa trên SHA-256 của nguồn. Đường dẫn
+conversion tương ứng được ghi tại `metadata.converted_docx` trong `report.json`.
+
+### 4. Chạy kiểm tra tự động
+
+```powershell
 uv run python scripts/audit_hf_coverage.py
 uv run python scripts/audit_markdown_fidelity.py
 uv run python scripts/audit_xlsx_fidelity.py
@@ -76,10 +122,12 @@ uv run python scripts/audit_formulas.py
 uv run pytest
 ```
 
-At this point the clone is ready for an independent review. Do **not** run
-`curate_formula_reviews.py` before inspecting the formulas: that command reproduces the
-existing transcriptions and is not evidence that the current reviewer checked them.
-Open the local review material with:
+Các báo cáo audit được lưu dưới `data/derived/`. Kết quả đạt yêu cầu kỹ thuật có nghĩa là
+đường dẫn nguồn, hash, block, bảng, media và công thức đã được bảo toàn theo phạm vi của
+từng audit; kết quả này không thay thế bước kiểm tra trực quan hoặc xác minh nội dung pháp
+lý.
+
+### 5. Mở dữ liệu để kiểm tra
 
 ```powershell
 explorer data\source_packages
@@ -91,25 +139,22 @@ Get-ChildItem data\derived\conversions -Recurse -Filter *.conversion.json
 Get-Content data\artifacts\validation_summary.json
 ```
 
-Review the authoritative Office source against the converted DOCX, Markdown, assets, and
-artifact report. `report.json` records `metadata.converted_docx`, which maps each original
-`.doc` to its hash-addressed local conversion. The main local outputs are:
+Nội dung cần đối chiếu gồm:
 
-```text
-data/source_packages/       Hugging Face Office sources
-data/derived/conversions/   DOCX conversions and *.conversion.json reports
-data/derived/markdown/      Markdown views and copied media
-data/artifacts/             blocks.jsonl, report.json, manifests, review queue
-data/derived/*audit*.json   structural audit reports
-```
+- `.doc` gốc và `.docx` sau chuyển đổi;
+- tài liệu Office gốc và Markdown tương ứng;
+- bảng có merged cell hoặc bảng lồng nhau;
+- công thức OMML, công thức dạng ảnh và biểu thức trong XLSX;
+- phụ lục, biểu mẫu và attachment nhúng;
+- cảnh báo được ghi trong `report.json` và `validation_summary.json`.
 
-All of these paths are ignored by Git. Re-running the commands from the same immutable
-source hashes recreates them locally.
+Không chạy `curate_formula_reviews.py` trước khi đối chiếu công thức. Script này tái tạo
+các bản phiên âm đã có theo hash nguồn, không phải bằng chứng cho một lần kiểm tra độc lập.
 
-## After visual review: reviewed formulas and chunks
+## Sinh dữ liệu sau khi review
 
-After the reviewer has compared the formulas with the original Office pages, reproduce
-the source-hash-bound review registry, regenerate the reviewed views, and chunk them:
+Sau khi hoàn tất đối chiếu công thức với tài liệu Office gốc, tạo review registry, sinh lại
+artifacts đã xác nhận và tiến hành chunking:
 
 ```powershell
 uv run python scripts/curate_formula_reviews.py
@@ -120,98 +165,65 @@ uv run python scripts/audit_chunks.py
 uv run pytest
 ```
 
-The final chunk audit must report `failed_documents: 0` before downstream embedding or
-indexing. A passing structural audit still does not replace legal/visual human approval.
+`audit_chunks.py` phải trả về `failed_documents: 0` trước khi chuyển sang embedding hoặc
+indexing. Báo cáo kiểm tra nằm tại `data/derived/chunk_audit.json`.
 
-The Hugging Face dataset contains source Office files only. Sync, DOC conversion,
-Markdown, chunks, database indexes, and container volumes stay local and are
-ignored by Git. Output locations are configurable through `SOURCE_PACKAGES_DIR`,
-`CONVERTED_DOCS_DIR`, `MARKDOWN_OUTPUT_DIR`, `CHUNKS_OUTPUT_DIR`,
-`INGEST_ARTIFACTS_DIR`, and `LOCAL_RUNTIME_DIR`.
+## Nguyên tắc xử lý dữ liệu
 
-`scripts/ingest_documents.py` generates Markdown by default. Use `--markdown-dir` to
-choose another local directory, or `--no-markdown` when only structured artifacts are
-needed. Markdown paths mirror the Hugging Face hierarchy and contain no machine-specific
-absolute paths.
+### Nguồn và định danh
 
-OMML equations are retained with source locators and an unverified LaTeX candidate.
-Formula images retain their original bytes; WMF/EMF also get a PNG preview on Windows.
-For optional **local** image formula OCR, use Python 3.11 and run
-`uv sync --python 3.11 --extra dev --extra formula-ocr`, then
-`uv run python scripts/ingest_documents.py --formula-ocr pix2tex`. The model may download
-weights on first use. OCR text is stored only as an unverified candidate; check it against
-the original DOCX before using it for retrieval. The default command runs without OCR.
-`scripts/audit_formulas.py` writes an ignored local review queue to
-`data/derived/formula_audit.json`. Its byte checks do not establish semantic correctness.
-After checking an expression against the original image, put its LaTeX in a local
-`data/derived/formula_reviews.json` review file with the source and media SHA-256 hashes,
-`status: "reviewed_visual"`, and a reviewer name. Pass
-`--formula-reviews data/derived/formula_reviews.json` to both ingestion and formula audit.
-An edited DOCX or image gets a new hash, so its older review cannot be applied. The
-review file is local derived data and is ignored by Git.
-`scripts/curate_formula_reviews.py` is the reproducible registry for expressions that have
-been visually checked in this corpus; it writes only the ignored review file and binds each
-record to the exact source and media hashes. Re-run the final ingestion command after it so
-the reviewed transcription is represented in the local Markdown and audit artifacts.
+Hugging Face chỉ lưu tài liệu Office gốc. Mỗi nguồn được định danh bằng đường dẫn tương
+đối và hash nội dung, vì vậy các file trùng tên trong những thư mục khác nhau không ghi đè
+lên nhau. Mỗi phụ lục hoặc biểu mẫu được liên kết với văn bản chính thông qua `package_id`
+và `parent_document_id`.
 
-The source catalog identifies one primary legal document in each package and links every
-appendix/form to it. The current command writes `blocks.jsonl`, `report.json`, Markdown,
-assets, and `validation_summary.json`; it does not write hierarchy or chunks. Every source
-is marked `requires_review`. In particular, the two legacy review workbooks cover only the
-31 primary documents and are not evidence that appendices/forms were extracted correctly.
+### DOC và DOCX
 
-Artifact directories use source IDs derived from relative paths and hashes, so repeated
-filenames cannot overwrite one another. A package is rejected when its primary document
-is absent, preventing an isolated form from being treated as an independently validated
-legal source.
+Microsoft Word thực hiện conversion `.doc → .docx`. Báo cáo `*.conversion.json` lưu số
+trang, đoạn, bảng, shape, field, footnote và các chỉ số cấu trúc khác trước và sau khi lưu.
+Conversion chỉ được chấp nhận khi các chỉ số bắt buộc không thay đổi.
 
-`scripts/generate_chunks.py` is a separate downstream phase. It refuses to run unless the
-current source IDs exist in the Markdown-preparation manifest. Primary legal documents use
-the legal hierarchy parser; appendices and forms use content windows linked to their parent
-document. The generated `chunks.jsonl`, `hierarchy.json`, manifests, and reports live only
-under `data/derived/chunks/` and are never committed.
-Run it only after Markdown, tables, and formulas have been reviewed.
-Tables and formula blocks are emitted as standalone chunks with source locators, structure,
-assets, and review metadata. XLSX chunks retain formulas and cached values. No table is
-silently filtered as letterhead or boilerplate; classification can be added only with an
-explicitly audited rule.
+### Công thức
 
-Run `scripts/audit_markdown_fidelity.py` before considering generated Markdown for
-chunking. It compares source hashes and DOCX body table counts, checks rendered table
-counts and image links, and compares copied media bytes with the Office package. A passing
-result proves structural coverage for the inspected files, not visual or semantic
-equivalence. The audit now also fails if any local `.doc`, `.docx`, or `.xlsx` source is
-absent from the preparation manifest. `scripts/audit_formulas.py` handles DOCX only and
-reports skipped `.doc`/`.xlsx` files explicitly. Compare the synced source inventory with
-the current Hugging Face revision before claiming full corpus coverage.
-`scripts/audit_xlsx_fidelity.py` separately checks workbook sheets, non-empty cells,
-formulas, cached formula results, merges, data validations, hidden rows/columns, and
-packaged media against the source workbook. `scripts/audit_chunks.py` then requires every
-prepared block to appear in exactly one chunk, verifies table/formula metadata and text,
-checks XLSX formulas and cached values, and confirms appendix/form linkage. A passing chunk
-audit proves exact preservation of prepared artifacts, not semantic legal correctness.
+Công thức OMML được giữ cùng source locator và bản LaTeX ứng viên. Công thức dạng ảnh giữ
+nguyên byte gốc; WMF/EMF có thêm PNG preview trên Windows. OCR công thức chỉ là tùy chọn:
 
-`scripts/audit_hf_coverage.py` reads the current Hugging Face file list without downloading
-it again. It exits with an error when any Office source path is absent from the synced local
-directory or the preparation manifest. It checks path coverage; the Markdown and formula
-audits check copied content and extraction details separately.
-
-## Shared-code/local-data rule
-
-GitHub contains source code, tests, configuration examples, lockfiles, and runbooks.
-Hugging Face contains immutable Office source documents. Each clone recreates all derived
-state locally using repository-relative paths:
-
-```text
-data/source_packages/   Hugging Face snapshot
-data/derived/           conversions, Markdown, chunks
-data/artifacts/         extraction/validation evidence
-data/runtime/           Qdrant, Neo4j, SQLite, object storage, other container volumes
+```powershell
+uv sync --python 3.11 --extra dev --extra formula-ocr
+uv run python scripts/ingest_documents.py --formula-ocr pix2tex
 ```
 
-Future Docker Compose files must bind or name volumes beneath `data/runtime/`; no teammate
-commits a database, index, container volume, generated Markdown, or generated chunk file.
+Kết quả OCR không được dùng làm dữ liệu xác nhận nếu chưa đối chiếu với tài liệu gốc.
+Review công thức được ràng buộc bằng SHA-256 của nguồn và nội dung công thức; review cũ
+không được áp dụng nếu tài liệu hoặc media thay đổi.
 
-Qdrant, Neo4j, SQLite, and their container bootstrap are not implemented yet. When added,
-their reproducible source/configuration is committed, while state remains under the ignored
-`data/runtime/` directory.
+### Bảng và workbook
+
+Bảng DOCX giữ tọa độ ô, row span, column span và bảng lồng nhau. XLSX giữ tên sheet, tọa
+độ ô, công thức, cached value, merged range, data validation, hàng/cột ẩn và media đóng
+gói. Không coi cached value là kết luận pháp lý có thẩm quyền.
+
+### Chunking
+
+Văn bản pháp luật được phân tích theo cây Điều/Khoản/Điểm. Phụ lục, biểu mẫu Word và
+workbook dùng content window nhưng vẫn giữ liên kết về văn bản cha. Bảng và công thức được
+tạo thành chunk độc lập, kèm locator, cấu trúc, asset và trạng thái review.
+
+Chunk audit yêu cầu mỗi source block xuất hiện đúng một lần, không có block lạ, không mất
+asset, và không thay đổi metadata của bảng hoặc công thức. Những bảng có hình thức giống
+header hoặc boilerplate vẫn được giữ lại cho đến khi có quy tắc phân loại được kiểm chứng.
+
+## Quy tắc lưu trữ
+
+```text
+GitHub                 source code, test, cấu hình mẫu và tài liệu hướng dẫn
+Hugging Face           tài liệu Office gốc
+data/source_packages/  snapshot nguồn trên local
+data/derived/          conversion, Markdown, audit và chunks trên local
+data/artifacts/        bằng chứng extraction và validation trên local
+data/runtime/          volume database và container trên local
+```
+
+Không commit corpus, Markdown, chunks, database, index hoặc container volume. Khi bổ sung
+Qdrant, Neo4j, SQLite hoặc object storage, repository chỉ lưu source/configuration dùng để
+khởi tạo lại; trạng thái runtime tiếp tục nằm dưới `data/runtime/`.
