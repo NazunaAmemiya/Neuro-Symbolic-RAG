@@ -231,7 +231,7 @@ def main() -> None:
     parser.add_argument("--source-dir", type=Path, default=Path("data/source_packages"))
     parser.add_argument("--artifact-dir", type=Path, default=Path("data/artifacts"))
     parser.add_argument("--markdown-dir", type=Path, default=Path("data/derived/markdown"))
-    parser.add_argument("--output", type=Path)
+    parser.add_argument("--output", type=Path, default=Path("data/derived/xlsx_fidelity.json"))
     args = parser.parse_args()
     result = audit(args.source_dir, args.artifact_dir, args.markdown_dir)
     if args.output:
