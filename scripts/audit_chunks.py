@@ -128,11 +128,9 @@ def audit_chunks(preparation_dir: Path, chunks_dir: Path) -> dict[str, Any]:
                 continue
             if block.get("text") and block["text"] not in matches[0].get("display_text", ""):
                 formula_failures += 1
-            actual = matches[0].get("metadata", {}).get("formula")
-            if actual is None:
-                copied = _chunk_block_payload(matches[0], block["block_id"])
-                actual = (copied or {}).get("metadata")
-            if actual != block.get("metadata", {}):
+            actual = _chunk_formula_payload(matches[0], block["block_id"])
+            expected = block.get("metadata", {})
+            if not isinstance(actual, dict) or not _same_formula_payload(actual, expected):
                 formula_failures += 1
         if table_failures:
             problems.append(f"table_failures:{table_failures}")
@@ -202,6 +200,25 @@ def _chunk_block_payload(chunk: dict[str, Any], block_id: str) -> dict[str, Any]
         if block.get("block_id") == block_id:
             return block
     return None
+
+
+def _chunk_formula_payload(chunk: dict[str, Any], block_id: str) -> dict[str, Any] | None:
+    """Read formula metadata from either chunk strategy's serialized shape."""
+
+    direct = chunk.get("metadata", {}).get("formula")
+    if isinstance(direct, dict):
+        return direct
+    block = _chunk_block_payload(chunk, block_id)
+    payload = (block or {}).get("metadata")
+    return payload if isinstance(payload, dict) else None
+
+
+def _same_formula_payload(actual: dict[str, Any], expected: dict[str, Any]) -> bool:
+    """Compare source transcription fields while allowing chunk-level review enrichment."""
+
+    # The chunker may add a reviewed transcription to its formula metadata. Every field
+    # already present in the prepared source block must remain unchanged.
+    return all(actual.get(key) == value for key, value in expected.items())
 
 
 def _load_json(path: Path) -> Any:
