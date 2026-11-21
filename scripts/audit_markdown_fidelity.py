@@ -140,7 +140,41 @@ def audit(source_root: Path, artifact_root: Path, markdown_root: Path) -> dict:
                     f"_assets/{item['document_id']}/{asset_id}-{Path(asset['filename']).name}",
                     safe="/",
                 )
-                if f"({link})" not in markdown:
+                original_linked = any(
+                    token in markdown
+                    for token in (f"({link})", f'src="{link}"', f'href="{link}"')
+                )
+
+                converted_linked = False
+                if (
+                    asset["kind"] == "image"
+                    and Path(asset["filename"]).suffix.lower() in {".emf", ".wmf"}
+                ):
+                    png_filename = f"{asset_id}-{Path(asset['filename']).name}.png"
+                    png_path = (
+                        markdown_path.parent
+                        / "_assets"
+                        / item["document_id"]
+                        / png_filename
+                    )
+                    png_link = quote(
+                        f"_assets/{item['document_id']}/{png_filename}",
+                        safe="/",
+                    )
+                    converted_linked = (
+                        png_path.is_file()
+                        and png_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+                        and any(
+                            token in markdown
+                            for token in (
+                                f"({png_link})",
+                                f'src="{png_link}"',
+                                f'href="{png_link}"',
+                            )
+                        )
+                    )
+
+                if not (original_linked or converted_linked):
                     problems.append(f"missing_markdown_link:{asset_id}")
         results.append(
             {

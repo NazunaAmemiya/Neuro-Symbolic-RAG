@@ -23,6 +23,7 @@ from .models import (
     IssueSeverity,
     SourceDocument,
     TableCell,
+    TableCellContent,
     TableData,
     stable_id,
 )
@@ -220,6 +221,7 @@ def extract_docx(
                 table_block.asset_ids.extend(
                     asset_id for block in media_blocks for asset_id in block.asset_ids
                 )
+                _link_table_media(table, media_blocks)
                 blocks.extend(media_blocks)
                 assets.extend(new_assets)
                 order += len(media_blocks)
@@ -770,6 +772,128 @@ def _parse_ole10native(data: bytes) -> tuple[str, bytes]:
     raise ValueError("unsupported Ole10Native layout")
 
 
+def _cell_paragraph_content(paragraph: etree._Element) -> list[TableCellContent]:
+    """Read text/media in document order, retaining every image occurrence.
+
+    Only the preferred branch of mc:AlternateContent is emitted, so Choice and
+    Fallback do not show the same picture twice in a table cell.
+    """
+    parts: list[TableCellContent] = []
+
+    def append_text(value: str) -> None:
+        if not value:
+            return
+        if parts and parts[-1].kind == "text":
+            parts[-1].text += value
+        else:
+            parts.append(TableCellContent(kind="text", text=value))
+
+    def visit(node: etree._Element, *, alternate: bool = False) -> None:
+        if node.tag == _q("m", "oMath"):
+            if not alternate:
+                append_text(inline_math_component(node) or math_marker(node))
+            return
+        if node.tag == _q("mc", "AlternateContent"):
+            choices = [child for child in node if child.tag == _q("mc", "Choice")]
+            fallback = next(
+                (child for child in node if child.tag == _q("mc", "Fallback")), None
+            )
+            primary = choices[0] if choices else fallback
+            if primary is None:
+                return
+            start = len(parts)
+            visit(primary, alternate=alternate)
+            primary_ids = {
+                (part.relationship_id, part.media_type)
+                for part in parts[start:]
+                if part.relationship_id
+            }
+            for other in node:
+                if other is primary:
+                    continue
+                before_alternative = len(parts)
+                visit(other, alternate=True)
+                parts[before_alternative:] = [
+                    part
+                    for part in parts[before_alternative:]
+                    if (part.relationship_id, part.media_type) not in primary_ids
+                ]
+            return
+        if node.tag in {_q("w", "pPr"), _q("w", "rPr")}:
+            return
+        if node.tag == _q("w", "t"):
+            if not alternate:
+                append_text(node.text or "")
+            return
+        if node.tag == _q("w", "tab"):
+            if not alternate:
+                append_text("\t")
+            return
+        if node.tag in {_q("w", "br"), _q("w", "cr")}:
+            if not alternate:
+                append_text("\n")
+            return
+        if node.tag == _q("w", "footnoteReference"):
+            if not alternate:
+                note_id = node.get(_q("w", "id"), "")
+                if note_id:
+                    append_text(f"[^{note_id}]")
+            return
+        if node.tag in {_q("a", "blip"), _q("v", "imagedata"), _q("o", "OLEObject")}:
+            rel_key = _q("r", "embed") if node.tag == _q("a", "blip") else _q("r", "id")
+            rel_id = node.get(rel_key)
+            if rel_id:
+                is_ole = node.tag == _q("o", "OLEObject")
+                kind = "attachment" if is_ole else "image"
+                parts.append(
+                    TableCellContent(
+                        kind=f"alternate_{kind}" if alternate else kind,
+                        relationship_id=rel_id,
+                        media_type="ole" if is_ole else "image",
+                    )
+                )
+            return
+        for child in node:
+            visit(child, alternate=alternate)
+
+    visit(paragraph)
+    return parts
+
+
+def _link_table_media(table: TableData, media_blocks: list[DocumentBlock]) -> None:
+    """Bind cell occurrences to extracted assets without losing media evidence blocks."""
+    by_relationship: dict[tuple[str, str], DocumentBlock] = {}
+    for block in media_blocks:
+        rel_id = block.metadata.get("relationship_id")
+        if rel_id and block.asset_ids:
+            media_type = "ole" if block.kind is BlockKind.ATTACHMENT else "image"
+            by_relationship[(str(rel_id), media_type)] = block
+
+    def visit(current: TableData) -> None:
+        for cell in current.cells:
+            for part in cell.content:
+                if part.kind not in {
+                    "image", "attachment", "alternate_image", "alternate_attachment"
+                }:
+                    continue
+                block = by_relationship.get((part.relationship_id or "", part.media_type or ""))
+                if block is None:
+                    continue
+                part.asset_id = block.asset_ids[0]
+                if block.kind is BlockKind.FORMULA:
+                    if part.kind == "image":
+                        part.kind = "formula_image"
+                    part.reviewed_latex = block.metadata.get("reviewed_latex")
+                    part.ocr_candidate_latex = block.metadata.get("ocr_candidate_latex")
+                    part.ocr_status = block.metadata.get("ocr_status")
+                cell.asset_ids.append(part.asset_id)
+                block.metadata["rendered_in_table"] = True
+            for nested in cell.nested_tables:
+                visit(nested)
+
+    visit(table)
+
+
 def _table_data(table_element: etree._Element, report: ExtractionReport) -> TableData:
     rows = table_element.findall("w:tr", namespaces=NS)
     cells: list[TableCell] = []
@@ -794,34 +918,62 @@ def _table_data(table_element: etree._Element, report: ExtractionReport) -> Tabl
                 if vertical_element is not None
                 else None
             )
-            paragraphs = tc.findall("w:p", namespaces=NS)
             paragraph_parts: list[str] = []
             cell_spans: list[InlineSpan] = []
-            for paragraph in paragraphs:
-                paragraph_text, spans, footnote_ids = _paragraph_content(paragraph)
-                if paragraph_text:
-                    paragraph_parts.append(paragraph_text)
-                cell_spans.extend(spans)
-                table_footnotes.extend(footnote_ids)
-                report.paragraph_count += 1
-                report.footnote_reference_count += len(footnote_ids)
-                report.superscript_span_count += sum(span.superscript for span in spans)
-                report.subscript_span_count += sum(span.subscript for span in spans)
             nested_tables: list[TableData] = []
-            for nested_element in tc.findall("w:tbl", namespaces=NS):
-                report.table_count += 1
-                nested = _table_data(nested_element, report)
-                nested_tables.append(nested)
-                paragraph_parts.append(nested.as_text())
-                table_footnotes.extend(nested.footnote_ids)
+            content: list[TableCellContent] = []
+            for child in tc:
+                if child.tag == _q("w", "p"):
+                    paragraph_text, spans, footnote_ids = _paragraph_content(child)
+                    if paragraph_text:
+                        paragraph_parts.append(paragraph_text)
+                    cell_spans.extend(spans)
+                    table_footnotes.extend(footnote_ids)
+                    report.paragraph_count += 1
+                    report.footnote_reference_count += len(footnote_ids)
+                    report.superscript_span_count += sum(span.superscript for span in spans)
+                    report.subscript_span_count += sum(span.subscript for span in spans)
+                    paragraph_content = _cell_paragraph_content(child)
+                    if paragraph_content:
+                        if content:
+                            content.append(TableCellContent(kind="break"))
+                        content.extend(paragraph_content)
+                elif child.tag == _q("w", "tbl"):
+                    report.table_count += 1
+                    nested = _table_data(child, report)
+                    if content:
+                        content.append(TableCellContent(kind="break"))
+                    content.append(
+                        TableCellContent(
+                            kind="nested_table", nested_table_index=len(nested_tables)
+                        )
+                    )
+                    nested_tables.append(nested)
+                    paragraph_parts.append(nested.as_text())
+                    table_footnotes.extend(nested.footnote_ids)
             text = "\n".join(paragraph_parts).strip()
 
             if vertical_value == "continue" and column in active_vertical:
                 origin = active_vertical[column]
                 origin.row_span += 1
-                if text and text not in origin.text:
+                new_text = bool(text and text not in origin.text)
+                if new_text:
                     origin.text = "\n".join(value for value in (origin.text, text) if value)
                     origin.spans.extend(cell_spans)
+                has_media = any(
+                    part.kind in {"image", "attachment", "alternate_image", "alternate_attachment"}
+                    for part in content
+                )
+                if new_text or has_media or nested_tables:
+                    if origin.content:
+                        origin.content.append(TableCellContent(kind="break"))
+                    offset = len(origin.nested_tables)
+                    for part in content:
+                        if not new_text and part.kind in {"text", "break"}:
+                            continue
+                        if part.kind == "nested_table" and part.nested_table_index is not None:
+                            part.nested_table_index += offset
+                        origin.content.append(part)
                     origin.nested_tables.extend(nested_tables)
                 continued_columns.update(range(column, column + column_span))
                 has_merged = True
@@ -835,6 +987,7 @@ def _table_data(table_element: etree._Element, report: ExtractionReport) -> Tabl
                     text=text,
                     spans=cell_spans,
                     nested_tables=nested_tables,
+                    content=content,
                 )
                 cells.append(cell)
                 if vertical_value == "restart":
@@ -851,6 +1004,15 @@ def _table_data(table_element: etree._Element, report: ExtractionReport) -> Tabl
             ):
                 del active_vertical[active_column]
         max_columns = max(max_columns, column)
+
+    # Keep ordered tokens only where needed. Plain text cells already have the
+    # original text/spans; avoiding duplicate tokens keeps JSONL sizes stable.
+    for cell in cells:
+        if not any(
+            part.kind in {"image", "attachment", "alternate_image", "alternate_attachment"}
+            for part in cell.content
+        ):
+            cell.content.clear()
 
     return TableData(
         rows=len(rows),
