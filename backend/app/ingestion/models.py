@@ -78,6 +78,25 @@ class InlineSpan:
 
 
 @dataclass(slots=True)
+class TableCellContent:
+    """Ordered visible content within a Word table cell.
+
+    Media references are resolved to asset_ids after the source media is extracted.
+    A nested_table_index points to the cell's nested_tables list.
+    """
+
+    kind: str  # text, break, image, attachment, nested_table
+    text: str = ""
+    relationship_id: str | None = None
+    asset_id: str | None = None
+    nested_table_index: int | None = None
+    media_type: str | None = None  # image or ole
+    reviewed_latex: str | None = None
+    ocr_candidate_latex: str | None = None
+    ocr_status: str | None = None
+
+
+@dataclass(slots=True)
 class TableCell:
     row: int
     column: int
@@ -86,6 +105,8 @@ class TableCell:
     text: str
     spans: list[InlineSpan] = field(default_factory=list)
     nested_tables: list[TableData] = field(default_factory=list)
+    content: list[TableCellContent] = field(default_factory=list)
+    asset_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

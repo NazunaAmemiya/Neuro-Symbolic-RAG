@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
 from .formula_ocr import metafile_png
-from .models import BlockKind, DocumentBlock, EmbeddedAsset, SourceDocument, TableData
+from .models import BlockKind, DocumentBlock, EmbeddedAsset, SourceDocument, TableCell, TableData
 
 _LEGAL_HEADING = re.compile(
     r"^(?:(PHẦN|CHƯƠNG|MỤC|TIỂU MỤC)\s+[0-9IVXLCDM]+|(ĐIỀU)\s+\d+[A-ZÀ-ỸĐ]*[.:]?)",
@@ -142,8 +142,10 @@ def _render_block(block: DocumentBlock, asset_links: dict[str, str]) -> str:
     if block.kind is BlockKind.PARAGRAPH:
         return _render_paragraph(block)
     if block.kind is BlockKind.TABLE and block.table is not None:
-        return _render_table(block.table)
+        return _render_table(block.table, asset_links)
     if block.kind in {BlockKind.IMAGE, BlockKind.FORMULA, BlockKind.ATTACHMENT}:
+        if block.metadata.get("rendered_in_table"):
+            return ""
         return _render_assets(block, asset_links)
     return block.text
 
@@ -160,7 +162,7 @@ def _render_paragraph(block: DocumentBlock) -> str:
     return text
 
 
-def _render_table(table: TableData) -> str:
+def _render_table(table: TableData, asset_links: dict[str, str]) -> str:
     cells_by_row: dict[int, list] = {}
     for cell in table.cells:
         cells_by_row.setdefault(cell.row, []).append(cell)
@@ -174,15 +176,76 @@ def _render_table(table: TableData) -> str:
             if cell.column_span > 1:
                 attributes.append(f'colspan="{cell.column_span}"')
             attribute_text = f" {' '.join(attributes)}" if attributes else ""
-            value = cell.text
-            for nested_table in cell.nested_tables:
-                value = value.replace(nested_table.as_text(), "").strip()
-            value = html.escape(value).replace("\n", "<br>")
-            nested = "".join(_render_table(item) for item in cell.nested_tables)
-            rows.append(f"    <td{attribute_text}>{value}{nested}</td>")
+            if any(
+                part.kind in {
+                    "image",
+                    "formula_image",
+                    "attachment",
+                    "alternate_image",
+                    "alternate_attachment",
+                }
+                for part in cell.content
+            ):
+                value = _render_cell_content(cell, asset_links)
+            else:
+                value = cell.text
+                for nested_table in cell.nested_tables:
+                    value = value.replace(nested_table.as_text(), "").strip()
+                value = html.escape(value).replace("\n", "<br>")
+                value += "".join(_render_table(item, asset_links) for item in cell.nested_tables)
+            rows.append(f"    <td{attribute_text}>{value}</td>")
         rows.append("  </tr>")
     rows.append("</table>")
     return "\n".join(rows)
+
+
+def _render_cell_content(cell: TableCell, asset_links: dict[str, str]) -> str:
+    """Render mixed Word cell content inside its own <td>, preserving occurrence order."""
+    values: list[str] = []
+    for part in cell.content:
+        if part.kind == "text":
+            values.append(html.escape(part.text).replace("\n", "<br>"))
+        elif part.kind == "break":
+            values.append("<br>")
+        elif part.kind == "nested_table":
+            if part.nested_table_index is not None:
+                values.append(
+                    _render_table(cell.nested_tables[part.nested_table_index], asset_links)
+                )
+        elif part.kind in {"image", "formula_image"}:
+            link = asset_links.get(part.asset_id or "")
+            if link:
+                label = "Công thức" if part.kind == "formula_image" else "Hình ảnh"
+                values.append(
+                    f'<img src="{html.escape(link, quote=True)}" '
+                    f'alt="{label}">'
+                )
+                if part.kind == "formula_image":
+                    if part.reviewed_latex:
+                        values.append(
+                            "<small>Bản phiên âm đã đối chiếu ảnh gốc: "
+                            f"<code>{html.escape(part.reviewed_latex)}</code></small>"
+                        )
+                    elif part.ocr_candidate_latex:
+                        values.append(
+                            "<small>OCR chưa xác minh: "
+                            f"<code>{html.escape(part.ocr_candidate_latex)}</code></small>"
+                        )
+                    elif part.ocr_status == "failed":
+                        values.append("<small>OCR lỗi; cần đọc ảnh gốc.</small>")
+            else:
+                values.append("[HÌNH ẢNH CẦN KIỂM TRA]")
+        elif part.kind in {"alternate_image", "alternate_attachment"}:
+            link = asset_links.get(part.asset_id or "")
+            if link:
+                values.append(f'<a href="{html.escape(link, quote=True)}">Bản media dự phòng</a>')
+        elif part.kind == "attachment":
+            link = asset_links.get(part.asset_id or "")
+            if link:
+                values.append(f'<a href="{html.escape(link, quote=True)}">Tệp đính kèm</a>')
+            else:
+                values.append("[TỆP ĐÍNH KÈM CẦN KIỂM TRA]")
+    return "".join(values)
 
 
 def _render_assets(block: DocumentBlock, asset_links: dict[str, str]) -> str:
